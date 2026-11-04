@@ -158,21 +158,40 @@ const decodeEntities = (s) => s
   .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
   .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
 
-/** 比对用的归一化：全角转半角、去空格与标点、统一小写 */
+/**
+ * 比对用的归一化
+ *   全角转半角 → 去掉括号及其内容 → 去空格与标点 → 小写
+ *
+ * 为什么要去掉括号内容：
+ *   ID3 标题常是 `Angels`，而歌词文件叫 `Angels (Radio Edit)-...-歌词.lrc`，
+ *   不去掉括号就会出现「本该配上却配不上」。
+ */
 const norm = (s) => decodeEntities(String(s || ''))
   .toLowerCase()
+  .replace(/（[^）]*）|\([^)]*\)|【[^】]*】|\[[^\]]*\]/g, '')
   .replace(/[\uff01-\uff5e]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
-  .replace(/[\s\-_·.,:;!?'"“”‘’()（）\[\]【】&+~`|/\\]/g, '')
+  .replace(/[\s\-_·.,:;!?'"“”‘’&+~`|/\\]/g, '')
   .trim()
 
-/** 从 `歌手 - 歌名.mp3` / `歌名.mp3` 猜歌名歌手 */
+/** 从 `歌手 - 歌名.mp3` / `歌名.mp3` 猜歌名歌手（仅在文件没有 ID3 标签时使用） */
 const parseAudioFileName = (fileName) => {
   let base = decodeEntities(baseNoExt(fileName))
   base = base.replace(/^\s*\d{1,3}\s*[.\-_、)]\s*/, '')
-  const m = base.match(/^(.+?)\s*[-–—－]\s*(.+)$/)
-  // 网易云那种纯 ID 文件名（如 002OKIox28ad9a）不当作歌名解析
+
+  // 网易云那种纯 ID 文件名（如 002OKIox28ad9a）不当歌名解析
   if (/^[A-Za-z0-9]{8,}$/.test(base)) return { title: base, artist: '' }
-  if (m) return { artist: m[1].trim(), title: m[2].trim() }
+
+  // 优先认「两边都有空格」的分隔符：`歌手 - 歌名`
+  const spaced = base.match(/^(.+?)\s+[-–—－]\s+(.+)$/)
+  if (spaced) return { artist: spaced[1].trim(), title: spaced[2].trim() }
+
+  // 没有空格时按「最后一个连字符」切：`HOYO-Mix-希望有羽毛和翅膀` → 歌手 HOYO-Mix
+  // 用最后一个而不是第一个，避免把歌手名里的连字符当分隔符
+  const lastDash = base.lastIndexOf('-')
+  if (lastDash > 0 && lastDash < base.length - 1) {
+    return { artist: base.slice(0, lastDash).trim(), title: base.slice(lastDash + 1).trim() }
+  }
+
   return { title: base.trim(), artist: '' }
 }
 
@@ -305,6 +324,19 @@ const tryPairAll = () => {
     if (!hit) hit = available.find(l => norm(l.title) === norm(row.title))
     // ③ 歌名 + 歌手都相同
     if (!hit && row.artist) hit = available.find(l => norm(l.title + l.artist) === norm(row.title + row.artist))
+    // ④ 歌词命名反序（歌手-歌名-歌词）：把歌名与歌手对调再比一次
+    if (!hit && row.artist) hit = available.find(l => norm(l.artist) === norm(row.title) && norm(l.title) === norm(row.artist))
+    // ⑤ 包含关系兜底（如歌名 "青空" 对上 "青空Candy_Wind"），要求长度接近以免误配
+    if (!hit) {
+      const key = norm(row.title)
+      hit = available.find(l => {
+        const k = norm(l.title)
+        if (!k || !key) return false
+        const shorter = k.length <= key.length ? k : key
+        const longer = k.length <= key.length ? key : k
+        return shorter.length >= 2 && longer.includes(shorter) && longer.length - shorter.length <= 6
+      })
+    }
 
     if (hit) {
       row.lyricText = hit.text
