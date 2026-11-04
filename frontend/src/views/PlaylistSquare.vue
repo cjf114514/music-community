@@ -65,7 +65,9 @@
           </el-radio-group>
         </el-form-item>
         <el-form-item label="歌单分类">
-          <el-input v-model="createForm.category" placeholder="如：华语、流行、摇滚、电子、民谣..." maxlength="50" />
+          <el-select v-model="createForm.category" placeholder="选择分类，也可直接输入自定义" clearable filterable allow-create default-first-option style="width: 100%">
+            <el-option v-for="c in PLAYLIST_CATEGORIES" :key="c" :label="c" :value="c" />
+          </el-select>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -82,6 +84,7 @@ import { useRouter } from 'vue-router'
 import { getPublicPlaylists, getPlaylistCategories, createPlaylist, uploadCover } from '@/api/song'
 import { useUserStore } from '@/stores/user'
 import { ElMessage } from 'element-plus'
+import { PLAYLIST_CATEGORIES } from '@/constants/playlist'
 
 const router = useRouter()
 const userStore = useUserStore()

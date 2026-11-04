@@ -1,5 +1,6 @@
 <template>
   <div class="playlist-detail" v-loading="loading">
+    <NotFound v-if="notFound" title="歌单不存在或已被删除" subtitle="分享链接可能已失效，或者这个歌单已经被作者删除" />
     <div v-if="playlist" class="playlist-header">
       <div class="playlist-cover-large">
         <el-image v-if="playlist.coverUrl" :src="playlist.coverUrl" fit="cover" />
@@ -231,7 +232,9 @@
           <el-input v-model="editForm.description" type="textarea" :rows="3" />
         </el-form-item>
         <el-form-item label="歌单分类">
-          <el-input v-model="editForm.category" placeholder="如：华语、流行、摇滚、电子、民谣..." maxlength="50" />
+          <el-select v-model="editForm.category" placeholder="选择分类，也可直接输入自定义" clearable filterable allow-create default-first-option style="width: 100%">
+            <el-option v-for="c in PLAYLIST_CATEGORIES" :key="c" :label="c" :value="c" />
+          </el-select>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -265,6 +268,8 @@ import { usePlaylistStore } from '@/stores/playlist'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import draggable from 'vuedraggable'
 import ShareDialog from '@/components/ShareDialog.vue'
+import NotFound from '@/components/NotFound.vue'
+import { PLAYLIST_CATEGORIES } from '@/constants/playlist'
 
 const route = useRoute()
 const router = useRouter()
@@ -297,6 +302,7 @@ const shareVisible = ref(false)
 const shareToken = ref('')
 
 const editForm = ref({ name: '', description: '', coverUrl: '', category: '' })
+const notFound = ref(false)
 
 const isOwner = computed(() => {
   return playlist.value?.userId === userStore.userInfo?.userId
@@ -317,7 +323,11 @@ const loadData = async () => {
       editForm.value = { name: playlist.value.name, description: playlist.value.description, coverUrl: playlist.value.coverUrl, category: playlist.value.category || '' }
     }
   } catch (e) {
-    ElMessage.error(e.response?.data?.message || '加载歌单失败')
+    if (e?.response?.status === 404) {
+      notFound.value = true          // 歌单被删 / 分享链接失效
+    } else {
+      ElMessage.error(e.response?.data?.message || '加载歌单失败')
+    }
     return
   } finally {
     loading.value = false

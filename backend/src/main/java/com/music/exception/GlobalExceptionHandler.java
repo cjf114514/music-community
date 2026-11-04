@@ -1,45 +1,71 @@
 package com.music.exception;
 
 import com.music.common.Result;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 /**
  * 全局异常处理器
  *
  * ========== 为什么需要它？==========
- * Controller 方法中如果抛出了异常没有 try-catch:
- *   没有这个处理器 → Spring 返回默认的 500 错误页面/JSON (内容不可控)
- *   有了这个处理器 → 自动捕获异常 → 返回格式统一的 Result.error()
+ * Controller / Service 里抛出的异常如果没有被捕获，
+ * 没有这个处理器 → Spring 返回默认的 500 错误页（格式不可控）
+ * 有了这个处理器 → 自动捕获 → 返回格式统一的 Result + 合适的 HTTP 状态码
  *
- * ========== 工作原理 ==========
- * @RestControllerAdvice = @ControllerAdvice + @ResponseBody
- *   作用: 拦截所有 @RestController 抛出的异常
+ * ========== 错误分层 ==========
+ *   404 ResourceNotFoundException —— 资源不存在（歌单被删、歌曲下架…）
+ *   500 RuntimeException        —— 真正的服务端问题（"失败"）
+ *   401 由 JwtInterceptor 直接返回，不经过这里
  *
- * @ExceptionHandler(RuntimeException.class)
- *   作用: 专门处理 RuntimeException 及其子类
- *   方法参数中的异常对象 = 实际抛出的异常实例
- *   可以从 e.getMessage() 拿到具体的错误提示
- *
- * ========== 使用场景示例 ==========
- * Controller 中: throw new RuntimeException("用户名已存在")
- *    → 用户看到的 JSON: { "code": 500, "message": "用户名已存在", "data": null }
- *
- * Service 中: throw new RuntimeException("验证码错误")
- *    → 用户看到的 JSON: { "code": 500, "message": "验证码错误", "data": null }
- *
- * 这样做的优点: 业务代码不需要在每个方法里写 try-catch
- *   异常自然往上抛,由这个类统一兜底,保证返回格式一致
+ * 以前的实现把所有异常都当 500 返回，而且 HTTP 状态码永远是 200，
+ * 导致"用户点了失效链接"和"服务器崩了"在前端看起来一模一样。
  */
+@Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
     /**
-     * 处理所有未捕获的 RuntimeException
-     * 将异常信息包装成 Result.error() 返回
+     * 资源不存在 → HTTP 404 + code 404
+     *
+     * @ResponseStatus 让响应真正带上 404 状态码，
+     * 前端 axios 可以直接用 error.response.status 判断
+     */
+    @ExceptionHandler(ResourceNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public Result<Void> handleNotFound(ResourceNotFoundException e) {
+        log.debug("资源不存在: {}", e.getMessage());
+        return Result.error(404, e.getMessage());
+    }
+
+    /**
+     * 其他运行时异常 → HTTP 500 + code 500
+     *
+     * 这里兼作兜底：项目里还有大量历史代码用
+     *   throw new RuntimeException("歌单不存在")
+     * 来表达"不存在"。如果消息以「不存在」结尾，就按 404 处理，
+     * 避免为了改语义去动二十多处代码。
+     *
+     * 注意：返回 ResponseEntity 而不是加 @ResponseStatus，
+     * 因为同一个处理器要输出两种状态码（404 / 500），
+     * 写死 @ResponseStatus 会出现「HTTP 500 但 body.code=404」的矛盾。
+     *
+     * 后续新增代码请直接抛 ResourceNotFoundException，不要依赖这个消息匹配。
      */
     @ExceptionHandler(RuntimeException.class)
-    public Result<Void> handleRuntimeException(RuntimeException e) {
-        return Result.error(e.getMessage());
+    public ResponseEntity<Result<Void>> handleRuntimeException(RuntimeException e) {
+        String msg = e.getMessage();
+
+        if (msg != null && msg.endsWith("不存在")) {
+            log.debug("资源不存在(兼容旧消息): {}", msg);
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Result.error(404, msg));
+        }
+
+        log.warn("服务端异常: {}", msg, e);
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Result.error(msg == null ? "服务器内部错误" : msg));
     }
 }

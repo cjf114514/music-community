@@ -5,6 +5,8 @@
       <span>加载中...</span>
     </div>
 
+    <NotFound v-else-if="notFound" title="帖子不存在或已被删除" subtitle="它可能已被作者删除，或者链接已经失效" />
+
     <template v-else-if="post">
       <el-card class="post-card">
         <div class="post-header">
@@ -218,6 +220,7 @@ import {
   getCommentReplies, deletePost, updatePost, deleteComment
 } from '@/api/community'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import NotFound from '@/components/NotFound.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -246,6 +249,7 @@ onMounted(async () => {
 })
 
 const isPostOwner = ref(false)
+const notFound = ref(false)
 
 const loadPost = async () => {
   loading.value = true
@@ -254,7 +258,12 @@ const loadPost = async () => {
     post.value = res.data
     isPostOwner.value = userStore.userInfo?.userId && res.data.userId === userStore.userInfo.userId
   } catch (e) {
-    ElMessage.error('获取帖子失败')
+    // 后端对已删除的帖子返回 404，页面显示友好空状态
+    if (e?.response?.status === 404) {
+      notFound.value = true
+    } else {
+      ElMessage.error('获取帖子失败')
+    }
   } finally {
     loading.value = false
   }

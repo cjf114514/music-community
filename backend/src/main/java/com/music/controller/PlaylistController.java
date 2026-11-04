@@ -3,6 +3,7 @@ package com.music.controller;
 import com.music.common.Result;
 import com.music.entity.Playlist;
 import com.music.entity.Song;
+import com.music.exception.ResourceNotFoundException;
 import com.music.service.PlaylistService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -41,7 +42,8 @@ public class PlaylistController {
     public Result<Playlist> getPlaylistById(@PathVariable Long id) {
         Playlist playlist = playlistService.getPlaylistById(id);
         if (playlist == null) {
-            return Result.error("歌单不存在");
+            // 歌单被删除 / 链接过期 → 404，前端会显示「歌单不存在或已被删除」
+            throw new ResourceNotFoundException("歌单不存在或已被删除");
         }
         return Result.success(playlist);
     }
@@ -62,7 +64,7 @@ public class PlaylistController {
     public Result<Playlist> updatePlaylist(@PathVariable Long id, @RequestBody Playlist playlist) {
         Playlist existing = playlistService.getPlaylistById(id);
         if (existing == null) {
-            return Result.error("歌单不存在");
+            throw new ResourceNotFoundException("歌单不存在");
         }
         if (playlist.getName() != null) existing.setName(playlist.getName());
         if (playlist.getCoverUrl() != null) existing.setCoverUrl(playlist.getCoverUrl());

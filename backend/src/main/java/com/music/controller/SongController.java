@@ -2,6 +2,7 @@ package com.music.controller;
 
 import com.music.common.Result;
 import com.music.entity.Song;
+import com.music.exception.ResourceNotFoundException;
 import com.music.service.SongService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -56,7 +57,12 @@ public class SongController {
      */
     @GetMapping("/{id}")
     public Result<Song> getSongById(@PathVariable Long id) {
-        return Result.success(songService.getSongById(id));
+        Song song = songService.getSongById(id);
+        if (song == null) {
+            // 资源不存在 → 404（而不是返回 data=null 让前端拿空对象去取属性）
+            throw new ResourceNotFoundException("歌曲不存在或已下架");
+        }
+        return Result.success(song);
     }
 
     /**
@@ -140,7 +146,7 @@ public class SongController {
     public Result<Song> updateSong(@PathVariable Long id, @RequestBody Song song) {
         Song existing = songService.getSongById(id);
         if (existing == null) {
-            return Result.error("歌曲不存在");
+            throw new ResourceNotFoundException("歌曲不存在");
         }
         if (song.getName() != null) existing.setName(song.getName());
         if (song.getSinger() != null) existing.setSinger(song.getSinger());
@@ -169,7 +175,7 @@ public class SongController {
         }
         Song existing = songService.getSongById(id);
         if (existing == null) {
-            return Result.error("歌曲不存在");
+            throw new ResourceNotFoundException("歌曲不存在");
         }
         existing.setDuration(duration);
         songService.saveSong(existing);

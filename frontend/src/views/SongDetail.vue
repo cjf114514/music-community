@@ -1,5 +1,6 @@
 <template>
   <div class="song-detail" v-loading="loading">
+    <NotFound v-if="notFound" title="歌曲不存在或已下架" subtitle="这首歌可能已被删除，或者链接已经失效" />
     <div v-if="song" class="song-header">
       <div class="song-cover-large">
         <el-image v-if="song.coverUrl" :src="song.coverUrl" fit="cover" />
@@ -262,6 +263,7 @@ import { useUserStore } from '@/stores/user'
 import { useLyric } from '@/composables/useLyric'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import ShareDialog from '@/components/ShareDialog.vue'
+import NotFound from '@/components/NotFound.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -294,6 +296,7 @@ const shareToken = ref('')
 const activeTab = ref('lyrics')
 const similarSongs = ref([])
 const similarLoading = ref(false)
+const notFound = ref(false)
 
 const getGradient = (index) => {
   const gradients = [
@@ -351,8 +354,14 @@ const handleToggleFavorite = async () => {
 }
 
 const loadSong = async () => {
-  const res = await getSongById(route.params.id)
-  song.value = res.data
+  try {
+    const res = await getSongById(route.params.id)
+    song.value = res.data
+  } catch (e) {
+    // 后端对不存在的歌曲返回 404：显示友好空状态，而不是让页面空白
+    if (e?.response?.status === 404) { notFound.value = true; return }
+    throw e
+  }
   loadingLyric.value = true
   try {
     const lyricRes = await getSongLyric(route.params.id)
