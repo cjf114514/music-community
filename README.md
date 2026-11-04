@@ -4,16 +4,13 @@
 
 前端 Vue 3 + Vite + Element Plus　｜　后端 Spring Boot 3 + Spring Data JPA　｜　数据 MySQL 8 + Redis
 
-<!--
-  建议在这里放 2~4 张截图，视觉效果对仓库第一印象影响很大：
-  1) 新建 docs/screenshots/ 目录，把截图放进去
-  2) 去掉下面几行的注释，文件名改成你自己的
--->
-<!--
-![首页](docs/screenshots/home.png)
-![播放器与歌词](docs/screenshots/player.png)
-![管理后台](docs/screenshots/admin.png)
--->
+## 界面预览
+
+![首页：每日推荐与推荐歌单](docs/screenshots/home.png)
+
+![歌曲列表与底部播放器（含音频频谱可视化）](docs/screenshots/player.png)
+
+![管理后台：数据看板（播放趋势 / 内容分布 / 热门歌曲）](docs/screenshots/admin.png)
 
 ---
 
