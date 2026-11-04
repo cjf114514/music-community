@@ -91,6 +91,7 @@ const routes = [
       { path: 'dashboard', name: 'AdminDashboard', component: () => import('@/views/admin/Dashboard.vue'), meta: { requiresAuth: true, requiresAdmin: true } },
       { path: 'users', name: 'AdminUserManage', component: () => import('@/views/admin/UserManage.vue'), meta: { requiresAuth: true, requiresAdmin: true } },
       { path: 'songs', name: 'AdminSongManage', component: () => import('@/views/admin/SongManage.vue'), meta: { requiresAuth: true, requiresAdmin: true } },
+      { path: 'batch-import', name: 'AdminBatchImport', component: () => import('@/views/admin/BatchImport.vue'), meta: { requiresAuth: true, requiresAdmin: true } },
       { path: 'playlists', name: 'AdminPlaylistManage', component: () => import('@/views/admin/PlaylistManage.vue'), meta: { requiresAuth: true, requiresAdmin: true } },
       { path: 'comments', name: 'AdminCommentManage', component: () => import('@/views/admin/CommentManage.vue'), meta: { requiresAuth: true, requiresAdmin: true } },
       { path: 'community', name: 'AdminCommunityManage', component: () => import('@/views/admin/CommunityManage.vue'), meta: { requiresAuth: true, requiresAdmin: true } },
