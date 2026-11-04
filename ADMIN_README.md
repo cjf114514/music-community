@@ -15,29 +15,32 @@
 
 ## 🚀 快速开始
 
-### 1. 数据库更新
+### 1. 数据库与管理账号
 
-在 MySQL 中执行以下 SQL：
+表结构由 JPA 自动维护（`application.yml` 中 `ddl-auto: update`），**首次启动会自动建表，不需要手动执行建表或加字段的 SQL**。
+
+导入演示数据（`music_db_export.sql`）后，管理员账号已预置，可以直接用下面的 SQL 确认：
 
 ```sql
 USE music_db;
 
--- 添加 role 字段
-ALTER TABLE `user` 
-ADD COLUMN `role` VARCHAR(20) DEFAULT 'USER' COMMENT '角色：ADMIN-管理员 USER-普通用户';
+-- 查看所有管理员
+SELECT id, username, role FROM `user` WHERE role = 'ADMIN';
 
--- 添加索引
-ALTER TABLE `user` ADD INDEX idx_role (`role`);
-
--- 设置管理员
-UPDATE `user` SET `role` = 'ADMIN' WHERE `username` = 'admin';
+-- 如果需要把其他账号提升为管理员（把用户名换成你自己的）
+UPDATE `user` SET `role` = 'ADMIN' WHERE `username` = '你的用户名';
 ```
 
 ### 2. 登录管理员账号
 
-- **用户名**: `admin`
-- **密码**: `123456` (与之前相同)
-- **角色**: 自动设置为 `ADMIN`
+演示数据中预置了两个角色共 4 个账号：
+
+| 用户名 | 密码 | 角色 |
+|---|---|---|
+| `cjf` | `Demo@123456` | `ADMIN`（管理员） |
+| `cjf1` / `cjf2` / `cjf5` | `Demo@123456` | `USER`（普通用户） |
+
+> 如果你导入的是自己维护的数据库，请用你自己的管理员账号登录，上面的密码只对演示数据有效。
 
 ### 3. 访问管理后台
 
@@ -190,8 +193,8 @@ frontend/src/
 
 ## 📝 注意事项
 
-1. **首次使用必须执行数据库更新脚本**
-2. **admin 用户默认密码为 `123456`，建议修改**
+1. **表结构由 JPA 自动创建**（`ddl-auto: update`），首次启动无需手动建表
+2. **演示账号密码为 `Demo@123456`，上线前必须修改**
 3. **管理员入口仅对 ADMIN 角色可见**
 4. **所有管理操作都会受到权限拦截器保护**
 
@@ -200,7 +203,7 @@ frontend/src/
 ##  常见问题
 
 ### Q: 登录后看不到"管理后台"入口？
-A: 检查数据库中 admin 用户的 role 字段是否为 'ADMIN'
+A: 检查数据库中该用户的 `role` 字段是否为 `'ADMIN'`（演示数据里的管理员是 `cjf`）
 
 ### Q: 访问管理页面被重定向到首页？
 A: 路由守卫会拦截非管理员访问，请使用管理员账号登录
