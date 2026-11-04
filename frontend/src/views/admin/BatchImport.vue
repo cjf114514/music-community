@@ -461,22 +461,24 @@ const onSingleLyricPicked = async (e) => {
 const blobToFile = (blob, name) => new File([blob.data], name, { type: blob.mime || 'image/jpeg' })
 
 const startImport = async () => {
-  const list = rows.value.filter(r => r.selected && r.status !== 'done')
-  if (!list.length) return
-  // 没有文件（刷新后尚未重新选择文件夹）的行直接跳过，避免整批失败
-  const missing = list.filter(r => !r.audio && !r.uploadedUrl)
+  const selectedRows = rows.value.filter(r => r.selected && r.status !== 'done')
+  if (!selectedRows.length) return
+
+  // 刷新后还没重新关联文件的行：跳过它们，不阻塞其余能导的
+  const list = selectedRows.filter(r => r.audio || r.uploadedUrl)
+  const missing = selectedRows.filter(r => !r.audio && !r.uploadedUrl)
   if (missing.length) {
     missing.forEach(r => { r.status = 'needFile'; r.message = '请重新选择文件' })
-    ElMessage.warning(`有 ${missing.length} 首还没关联到文件，请重新选择音乐文件夹（或取消勾选它们）`)
-    return
+    ElMessage.warning(`已跳过 ${missing.length} 首未关联文件的记录，重新选择音乐文件夹后再导它们`)
   }
+  if (!list.length) return
 
   importing.value = true
   importTotal.value = list.length
   importCurrent.value = 0
   let ok = 0
   let fail = 0
-  let skipped = 0
+  const skipped = missing.length
 
   for (let i = 0; i < list.length; i++) {
     const row = list[i]
