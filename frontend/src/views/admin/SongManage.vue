@@ -188,7 +188,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, UploadFilled } from '@element-plus/icons-vue'
 import request from '@/api/request'
-import { uploadAudio, uploadCover, getAudioDuration } from '@/api/song'
+import { uploadAudio, uploadCover, getAudioDuration, getSongLyric } from '@/api/song'
 
 const songs = ref([])
 const searchForm = reactive({ keyword: '', status: null })
@@ -364,11 +364,16 @@ const openAddDialog = () => {
   dialogVisible.value = true
 }
 
-const openEditDialog = (row) => {
+const openEditDialog = async (row) => {
   dialogTitle.value = '编辑歌曲'
-  Object.assign(form, { ...row })
+  Object.assign(form, { ...row, lyric: '' })
   fileStatus.value = []
   dialogVisible.value = true
+  // 歌词已从所有接口响应中剥离（避免列表响应过大），编辑时单独取一次
+  try {
+    const res = await getSongLyric(row.id)
+    if (res && res.data) form.lyric = res.data
+  } catch (e) { /* 没有歌词就留空 */ }
 }
 
 const handleAudioChange = async (uploadFile) => {

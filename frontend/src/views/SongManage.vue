@@ -113,7 +113,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { getAllSongs, uploadAudio, uploadCover, updateSong, getAudioDuration } from '@/api/song'
+import { getAllSongs, uploadAudio, uploadCover, updateSong, getAudioDuration, getSongLyric } from '@/api/song'
 import { ElMessage } from 'element-plus'
 
 // 读文本文件：.lrc 在中文 Windows 上常见 GBK 编码，UTF-8 解出乱码时退回 GBK
@@ -151,11 +151,16 @@ onMounted(async () => {
   songs.value = res.data || []
 })
 
-const openEdit = (row) => {
-  editForm.value = { ...row }
+const openEdit = async (row) => {
+  editForm.value = { ...row, lyric: '' }
   audioFile.value = null
   coverFile.value = null
   editVisible.value = true
+  // 歌词不在列表接口里返回了（避免响应体过大），编辑时单独取
+  try {
+    const res = await getSongLyric(row.id)
+    if (res && res.data) editForm.value.lyric = res.data
+  } catch (e) { /* 没有歌词就留空 */ }
 }
 
 const handleAudioChange = (file) => {

@@ -1,5 +1,6 @@
 package com.music.entity;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 import lombok.Data;
 import java.time.LocalDateTime;
@@ -51,7 +52,18 @@ public class Song {
      * 歌词内容 — TEXT 类型
      * columnDefinition = "TEXT" → 指定数据库列类型为 TEXT (可存长文本)
      * 默认 VARCHAR(255) 只能存 255 字符,不够放完整歌词
+     *
+     * @JsonProperty(access = WRITE_ONLY) —— 写进得去，读不出来：
+     *   · 反序列化（POST/PUT 请求体里的 lyric）照常可以写入
+     *   · 序列化（返回给前端的 JSON）会被剔除
+     *
+     * 为什么？歌词动辄 3-4KB，而一首歌的其他字段加起来才几百字节。
+     * 实测：17 首歌的 GET /api/songs 响应 21KB，其中歌词占 15KB（70%）。
+     * 等歌曲上千首时，列表接口会变成几 MB，首页和搜索会明显变慢。
+     *
+     * 前端需要歌词时，走专用接口 GET /api/songs/{id}/lyric 单独取。
      */
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     @Column(columnDefinition = "TEXT")
     private String lyric;
 
