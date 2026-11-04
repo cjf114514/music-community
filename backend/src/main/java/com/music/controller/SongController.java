@@ -4,6 +4,7 @@ import com.music.common.Result;
 import com.music.entity.Song;
 import com.music.service.SongService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
@@ -25,6 +26,7 @@ import java.util.List;
  * GET 查询接口在白名单中 → 游客可访问
  * POST/PUT/DELETE 需要登录 → JwtInterceptor 会拦截
  */
+@Slf4j
 @RestController
 @RequestMapping("/api/songs")
 @RequiredArgsConstructor
@@ -34,6 +36,13 @@ public class SongController {
     /** 上传根目录,从 application.yml 读取 (如: ./uploads) */
     @Value("${app.upload-dir}")
     private String uploadDir;
+
+    /**
+     * LRC 时间标签，如 [00:12] / [01:23.45]
+     * 用来判断 lyric 字段存的是「歌词正文」还是「旧数据的文件路径」
+     */
+    private static final java.util.regex.Pattern LRC_TIME_TAG =
+            java.util.regex.Pattern.compile("\\[\\d{1,2}:\\d{2}");
 
     /** 获取所有歌曲 — GET /api/songs */
     @GetMapping
@@ -53,22 +62,41 @@ public class SongController {
     /**
      * 歌词内容 — GET /api/songs/1/lyric
      *
-     * 歌词存储方式: lyric 字段存文件路径 → 读文件内容 → 返回 LRC 文本
-     * 为什么存文件而不是直接存数据库?
-     *   LRC 歌词可能很长 → TEXT 列有大小限制 → 单独文件更灵活
+     * lyric 字段支持两种存法，这里都要兼容：
+     *
+     *   ① 存歌词正文（当前方式）
+     *      直接把 LRC 文本存进数据库 TEXT 列。
+     *      好处：不依赖磁盘文件，不会出现"文件被删了歌词就没了"，
+     *            导出数据库时歌词一起带走，编辑时直接改文本。
+     *
+     *   ② 存文件路径（历史方式，如 /uploads/lyric/xxx.lrc）
+     *      早期设计是把 .lrc 传到 uploads/lyric 下，库里只存路径，
+     *      读的时候再打开文件。问题是一旦文件丢失就永久读不到（而且没有清理机制）。
+     *      保留这个分支只为兼容已存在的旧数据。
+     *
+     * 判断依据：内容里出现 [mm:ss 这种 LRC 时间标签，就当成正文；否则按路径处理。
      */
     @GetMapping("/{id}/lyric")
     public Result<String> getLyric(@PathVariable Long id) {
         Song song = songService.getSongById(id);
-        if (song == null || song.getLyric() == null) {
+        if (song == null || song.getLyric() == null || song.getLyric().isBlank()) {
             return Result.success(null);
         }
+        String lyric = song.getLyric();
+
+        // ① 正文：含 [mm:ss 时间标签 → 直接返回
+        if (LRC_TIME_TAG.matcher(lyric).find()) {
+            return Result.success(lyric);
+        }
+
+        // ② 旧数据的文件路径：读文件返回
         try {
-            String fileName = song.getLyric().substring(song.getLyric().lastIndexOf("/") + 1);
+            String fileName = lyric.substring(lyric.lastIndexOf("/") + 1);
             String lyricPath = uploadDir + "/lyric/" + fileName;
             String content = Files.readString(Paths.get(lyricPath));
             return Result.success(content);
         } catch (IOException e) {
+            log.warn("歌词文件读取失败，songId={}, lyric={}", id, lyric);
             return Result.success(null);
         }
     }

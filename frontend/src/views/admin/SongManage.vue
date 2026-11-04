@@ -85,6 +85,34 @@
 
     <el-dialog v-model="dialogVisible" :title="dialogTitle" width="560px" class="admin-dialog" :append-to-body="true">
       <el-form :model="form" label-width="80px" class="dark-form">
+        <!-- ===== 一体化拖拽区：音频 + 歌词 + 封面 一次拖进来 ===== -->
+        <div
+          class="drop-zone"
+          :class="{ active: dragOver }"
+          @dragover.prevent="dragOver = true"
+          @dragleave.prevent="dragOver = false"
+          @drop.prevent="handleDrop"
+          @click="openFilePicker"
+        >
+          <el-icon :size="24"><UploadFilled /></el-icon>
+          <p class="drop-title">把文件拖到这里，或点击选择</p>
+          <p class="drop-hint">音频 .mp3 .flac .wav .m4a　+　歌词 .lrc　+　封面图，可以一次全拖进来</p>
+          <p class="drop-hint">文件名写成「歌手 - 歌名.mp3」会自动填好歌手和歌名</p>
+          <div v-if="fileStatus.length" class="file-list" @click.stop>
+            <div v-for="(f, i) in fileStatus" :key="i" class="file-item" :class="f.state">
+              <span class="file-name">{{ f.name }}</span>
+              <span class="file-msg">{{ f.msg }}</span>
+            </div>
+          </div>
+        </div>
+        <input
+          ref="filePicker"
+          type="file"
+          multiple
+          accept=".mp3,.wav,.flac,.aac,.ogg,.m4a,.lrc,.jpg,.jpeg,.png,.gif,.webp"
+          style="display: none"
+          @change="handlePicked"
+        />
         <el-form-item label="歌曲名" required>
           <el-input v-model="form.name" placeholder="请输入歌曲名" />
         </el-form-item>
@@ -158,9 +186,9 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, UploadFilled } from '@element-plus/icons-vue'
 import request from '@/api/request'
-import { uploadAudio, uploadCover, uploadLyric, getAudioDuration } from '@/api/song'
+import { uploadAudio, uploadCover, getAudioDuration } from '@/api/song'
 
 const songs = ref([])
 const searchForm = reactive({ keyword: '', status: null })
@@ -171,6 +199,139 @@ const dialogTitle = ref('')
 const form = reactive({ id: null, name: '', singer: '', album: '', genre: '', url: '', coverUrl: '', lyric: '' })
 
 const genreOptions = ['流行', '摇滚', '民谣', '电子', '古典', '爵士', 'R&B', '嘻哈', '金属', '乡村', '蓝调', '雷鬼', '拉丁', '新世纪', '中国风', '古风', '轻音乐', '纯音乐', '原声带', '其他']
+
+// ==================== 一体化拖拽导入 ====================
+const dragOver = ref(false)
+const fileStatus = ref([])
+const filePicker = ref(null)
+
+const AUDIO_EXT = ['mp3', 'wav', 'flac', 'aac', 'ogg', 'm4a']
+const IMAGE_EXT = ['jpg', 'jpeg', 'png', 'gif', 'webp']
+
+const extOf = (name) => (name.toLowerCase().split('.').pop() || '')
+
+const classifyFile = (file) => {
+  const ext = extOf(file.name)
+  if (AUDIO_EXT.includes(ext)) return 'audio'
+  if (ext === 'lrc') return 'lyric'
+  if (IMAGE_EXT.includes(ext)) return 'cover'
+  return 'unknown'
+}
+
+/**
+ * 从「歌手 - 歌名.mp3」里拆出歌手和歌名
+ * 支持：歌手 - 歌名 / 歌手-歌名 / 01. 歌手 - 歌名
+ * 拆不出来就整体当歌名（用户可以在表单里改）
+ */
+const parseFileName = (fileName) => {
+  let base = fileName.replace(/\.[^.]+$/, '')
+  base = base.replace(/^\s*\d{1,3}\s*[.\-_、)]\s*/, '')       // 去掉音轨号 "01." "02_"
+  const m = base.match(/^(.+?)\s*[-–—－]\s*(.+)$/)
+  if (m) return { singer: m[1].trim(), name: m[2].trim() }
+  return { singer: '', name: base.trim() }
+}
+
+/**
+ * 读文本文件
+ * .lrc 在中文 Windows 上常见 GBK 编码，先按 UTF-8 读，
+ * 出现替换字符（\uFFFD）说明解错了，再退回 GBK
+ */
+const readTextFile = async (file) => {
+  const buf = await file.arrayBuffer()
+  let text = new TextDecoder('utf-8').decode(buf)
+  if (text.includes('\uFFFD')) {
+    try { text = new TextDecoder('gbk').decode(buf) } catch (e) { /* 浏览器不支持 GBK 就保持原样 */ }
+  }
+  return text.replace(/^\uFEFF/, '')
+}
+
+const setStatus = (name, state, msg) => {
+  const exist = fileStatus.value.find(f => f.name === name)
+  if (exist) { exist.state = state; exist.msg = msg } else { fileStatus.value.push({ name, state, msg }) }
+}
+
+const applyAudioFile = async (file) => {
+  const parsed = parseFileName(file.name)
+  if (!form.name) form.name = parsed.name
+  if (!form.singer && parsed.singer) form.singer = parsed.singer
+  setStatus(file.name, 'uploading', '上传中...')
+  form.url = 'uploading...'
+  try {
+    const res = await uploadAudio(file)
+    form.url = res.data
+    const duration = await getAudioDuration(file)
+    if (duration) form.duration = duration
+    form.format = extOf(file.name)
+    form.fileSize = file.size
+    const tip = duration ? `已上传（${Math.floor(duration / 60)}:${String(duration % 60).padStart(2, '0')}）` : '已上传'
+    const parsedTip = parsed.singer ? `，已自动填入「${parsed.singer} / ${parsed.name}」` : ''
+    setStatus(file.name, 'done', tip + parsedTip)
+  } catch (e) {
+    form.url = ''
+    setStatus(file.name, 'failed', '上传失败')
+    ElMessage.error(`音频上传失败：${file.name}`)
+  }
+}
+
+// 歌词：直接读文件内容存进表单，不再上传文件（修复原来存 URL 导致歌词解析为空的问题）
+const applyLyricFile = async (file) => {
+  try {
+    const text = await readTextFile(file)
+    const lineCount = (text.match(/\[\d{2}:\d{2}/g) || []).length
+    form.lyric = text
+    setStatus(file.name, 'done', lineCount ? `已读取 ${lineCount} 行歌词` : '已读取（未检测到时间标签，请检查格式）')
+  } catch (e) {
+    setStatus(file.name, 'failed', '读取失败')
+  }
+}
+
+const applyCoverFile = async (file) => {
+  setStatus(file.name, 'uploading', '上传中...')
+  try {
+    const res = await uploadCover(file)
+    form.coverUrl = res.data
+    setStatus(file.name, 'done', '已设为封面')
+  } catch (e) {
+    setStatus(file.name, 'failed', '上传失败')
+  }
+}
+
+const processFiles = async (files) => {
+  fileStatus.value = []
+  const list = Array.from(files || [])
+  if (!list.length) return
+
+  const audioCount = list.filter(f => classifyFile(f) === 'audio').length
+  if (audioCount > 1) ElMessage.warning('一次只能导入一首，多余的音频已忽略')
+
+  let audioUsed = false
+  for (const file of list) {
+    const kind = classifyFile(file)
+    if (kind === 'audio') {
+      if (audioUsed) { setStatus(file.name, 'skipped', '已忽略（一次一首）'); continue }
+      audioUsed = true
+      await applyAudioFile(file)
+    } else if (kind === 'lyric') {
+      await applyLyricFile(file)
+    } else if (kind === 'cover') {
+      await applyCoverFile(file)
+    } else {
+      setStatus(file.name, 'skipped', '不支持的格式')
+    }
+  }
+}
+
+const handleDrop = async (e) => {
+  dragOver.value = false
+  await processFiles(e.dataTransfer?.files)
+}
+
+const openFilePicker = () => filePicker.value && filePicker.value.click()
+
+const handlePicked = async (e) => {
+  await processFiles(e.target.files)
+  e.target.value = ''   // 清空，允许再次选同一个文件
+}
 
 const formatCount = (n) => {
   if (!n) return '0'
@@ -199,12 +360,14 @@ const loadSongs = async () => {
 const openAddDialog = () => {
   dialogTitle.value = '新增歌曲'
   Object.assign(form, { id: null, name: '', singer: '', album: '', genre: '', url: '', coverUrl: '', lyric: '', duration: null, fileSize: null, format: null })
+  fileStatus.value = []
   dialogVisible.value = true
 }
 
 const openEditDialog = (row) => {
   dialogTitle.value = '编辑歌曲'
   Object.assign(form, { ...row })
+  fileStatus.value = []
   dialogVisible.value = true
 }
 
@@ -232,13 +395,13 @@ const handleCoverChange = async (uploadFile) => {
   }
 }
 
+// 手动「选择LRC文件」按钮：同样直接读内容，不占用服务器存储
 const handleLyricChange = async (uploadFile) => {
   try {
-    const res = await uploadLyric(uploadFile.raw)
-    form.lyric = res.data
-    ElMessage.success('歌词上传成功')
+    form.lyric = await readTextFile(uploadFile.raw)
+    ElMessage.success('歌词已读取')
   } catch (e) {
-    ElMessage.error('歌词上传失败')
+    ElMessage.error('歌词读取失败')
   }
 }
 
@@ -322,6 +485,20 @@ onMounted(() => loadSongs())
 .page-btn:hover:not(:disabled) { background: rgba(255,255,255,0.1); }
 .page-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 .page-info { font-size: 13px; color: rgba(255,255,255,0.5); }
+/* ===== 一体化拖拽区 ===== */
+.drop-zone { border: 1.5px dashed rgba(102,126,234,0.45); border-radius: 10px; padding: 18px 16px; margin-bottom: 18px; text-align: center; color: rgba(255,255,255,0.55); cursor: pointer; transition: all 0.2s; background: rgba(102,126,234,0.05); }
+.drop-zone:hover { border-color: rgba(102,126,234,0.75); background: rgba(102,126,234,0.1); }
+.drop-zone.active { border-color: #667eea; background: rgba(102,126,234,0.18); }
+.drop-title { margin: 6px 0 4px; font-size: 14px; color: rgba(255,255,255,0.8); font-weight: 500; }
+.drop-hint { margin: 2px 0; font-size: 12px; color: rgba(255,255,255,0.35); line-height: 1.5; }
+.file-list { margin-top: 12px; text-align: left; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px; }
+.file-item { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; padding: 4px 6px; border-radius: 4px; }
+.file-item .file-name { color: rgba(255,255,255,0.7); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
+.file-item .file-msg { color: rgba(255,255,255,0.4); flex-shrink: 0; }
+.file-item.done .file-msg { color: #43e97b; }
+.file-item.failed .file-msg { color: #f5576c; }
+.file-item.uploading .file-msg { color: #f5a623; }
+.file-item.skipped .file-msg { color: rgba(255,255,255,0.3); }
 .upload-row { margin-bottom: 8px; }
 .upload-status { font-size: 12px; margin-top: 4px; }
 .upload-status.uploading { color: #f5a623; }

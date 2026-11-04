@@ -113,8 +113,18 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { getAllSongs, uploadAudio, uploadCover, uploadLyric, updateSong, getAudioDuration } from '@/api/song'
+import { getAllSongs, uploadAudio, uploadCover, updateSong, getAudioDuration } from '@/api/song'
 import { ElMessage } from 'element-plus'
+
+// 读文本文件：.lrc 在中文 Windows 上常见 GBK 编码，UTF-8 解出乱码时退回 GBK
+const readTextFile = async (file) => {
+  const buf = await file.arrayBuffer()
+  let text = new TextDecoder('utf-8').decode(buf)
+  if (text.includes('\uFFFD')) {
+    try { text = new TextDecoder('gbk').decode(buf) } catch (e) { /* 浏览器不支持则保持原样 */ }
+  }
+  return text.replace(/^\uFEFF/, '')
+}
 
 const songs = ref([])
 const editVisible = ref(false)
@@ -179,8 +189,8 @@ const handleSave = async () => {
       editForm.value.coverUrl = coverRes.data
     }
     if (lyricFile.value) {
-      const lyricRes = await uploadLyric(lyricFile.value)
-      editForm.value.lyric = lyricRes.data
+      // 直接读文件内容存进 lyric 字段（原来存的是上传后的 URL，前端解析不出歌词）
+      editForm.value.lyric = await readTextFile(lyricFile.value)
     }
 
     const { id, name, singer, album, genre, url, coverUrl, lyric, duration } = editForm.value
