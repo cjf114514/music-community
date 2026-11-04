@@ -39,4 +39,12 @@ public interface SongRepository extends JpaRepository<Song, Long> {
 
     @Query("SELECT DISTINCT s.genre FROM Song s WHERE s.genre IS NOT NULL AND s.status = 1")
     List<String> findDistinctGenres();
+
+    // ==================== 本地音乐库扫描用 ====================
+
+    /** 按音频地址查找（扫描时用 url 判断这首歌是否已入库） */
+    java.util.Optional<Song> findByUrl(String url);
+
+    /** 找出所有来自本地库的歌曲（用于检测文件已消失的失效条目） */
+    List<Song> findByUrlStartingWith(String prefix);
 }

@@ -41,6 +41,15 @@ public class WebConfig implements WebMvcConfigurer {
     private String uploadDir;
 
     /**
+     * 本地音乐库根目录（可选）
+     *
+     * 配了它就把整个目录挂到 /library/** 上，音频文件不需要复制到 uploads，
+     * 浏览器直接用 /library/<相对路径> 播放。留空则该能力关闭。
+     */
+    @Value("${app.library.audio-dir:}")
+    private String libraryAudioDir;
+
+    /**
      * ========== 1. CORS (跨域资源共享) 配置 ==========
      *
      * 为什么需要 CORS?
@@ -123,5 +132,13 @@ public class WebConfig implements WebMvcConfigurer {
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
         registry.addResourceHandler("/uploads/**")              // URL 路径模式
                 .addResourceLocations("file:" + uploadDir + "/"); // 映射到本地文件夹
+
+        // 本地音乐库：把配置的音乐目录直接挂成 /library/**，免去复制文件的几百 MB 开销
+        if (libraryAudioDir != null && !libraryAudioDir.isBlank()) {
+            String base = libraryAudioDir.replace('\\', '/');
+            if (!base.endsWith("/")) base += "/";
+            registry.addResourceHandler("/library/**")
+                    .addResourceLocations("file:" + base);
+        }
     }
 }

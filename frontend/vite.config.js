@@ -19,6 +19,11 @@ export default defineConfig({
       '/uploads': {
         target: 'http://localhost:8080',
         changeOrigin: true
+      },
+      // 本地音乐库：后端把配置的音乐目录挂载在 /library/** 下
+      '/library': {
+        target: 'http://localhost:8080',
+        changeOrigin: true
       }
     }
   }
