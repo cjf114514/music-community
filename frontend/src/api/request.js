@@ -41,7 +41,7 @@ request.interceptors.response.use(
       if (!window.location.pathname.includes('/login')) {
         window.location.href = '/login'
       }
-      ElMessage.error(res.message || '请先登录')
+      ElMessage.error(res.message || '登录已过期，请重新登录')
       return Promise.reject(new Error(res.message))
     }
     if (res.code !== 200) {
@@ -52,6 +52,7 @@ request.interceptors.response.use(
   },
   error => {
     if (error.response?.status === 401) {
+      const msg = error.response?.data?.message || '登录已过期，请重新登录'
       localStorage.removeItem('token')
       localStorage.removeItem('user')
       if (isGuestMode()) {
@@ -60,7 +61,7 @@ request.interceptors.response.use(
       if (!window.location.pathname.includes('/login')) {
         window.location.href = '/login'
       }
-      ElMessage.error('请先登录')
+      ElMessage.error(msg)
     }
     return Promise.reject(error)
   }
