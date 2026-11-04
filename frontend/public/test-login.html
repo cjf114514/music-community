@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>登录测试</title>
+</head>
+<body>
+    <h1>登录测试</h1>
+    <input type="text" id="username" value="admin" placeholder="用户名"><br><br>
+    <input type="password" id="password" value="123456" placeholder="密码"><br><br>
+    <button onclick="testLogin()">测试登录</button>
+    <pre id="result"></pre>
+
+    <script>
+        async function testLogin() {
+            try {
+                // 先获取验证码
+                const captchaKey = 'test-' + Date.now();
+                const captchaUrl = `/api/captcha/generate?key=${captchaKey}`;
+                
+                // 显示验证码图片
+                const img = document.createElement('img');
+                img.src = captchaUrl;
+                document.body.insertBefore(img, document.querySelector('button'));
+                
+                const captchaCode = prompt('请输入验证码:');
+                
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        username: 'admin',
+                        password: '123456',
+                        captchaKey: captchaKey,
+                        captchaCode: captchaCode
+                    })
+                });
+                
+                const data = await response.json();
+                document.getElementById('result').textContent = JSON.stringify(data, null, 2);
+            } catch (error) {
+                document.getElementById('result').textContent = 'Error: ' + error.message;
+            }
+        }
+    </script>
+</body>
+</html>
