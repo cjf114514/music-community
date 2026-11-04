@@ -41,9 +41,16 @@
       <div class="bar"><div class="bar-inner" :style="{ width: parsePercent + '%' }"></div></div>
     </div>
 
+    <!-- 断点续传提示 -->
+    <div v-if="missingFileCount" class="resume-tip">
+      <span>上次还有 <b>{{ missingFileCount }}</b> 首没导完。刷新后文件需要重新关联：</span>
+      <span>再点一次「选音乐文件夹」（选同一个文件夹即可），已导入的不会重复上传。</span>
+    </div>
+
     <!-- 统计 -->
     <div v-if="rows.length" class="stats">
       <span>音频 <b>{{ rows.length }}</b></span>
+      <span v-if="doneCount">已完成 <b class="ok">{{ doneCount }}</b></span>
       <span>已配对歌词 <b class="ok">{{ lyricMatched }}</b></span>
       <span>缺歌词 <b class="warn">{{ rows.length - lyricMatched }}</b></span>
       <span>待导入 <b>{{ selectedCount }}</b></span>
@@ -68,10 +75,10 @@
           </thead>
           <tbody>
             <tr v-for="row in rows" :key="row.key" :class="row.status">
-              <td><input v-model="row.selected" type="checkbox" /></td>
-              <td><input v-model="row.title" class="cell-input" /></td>
-              <td><input v-model="row.artist" class="cell-input" /></td>
-              <td><input v-model="row.album" class="cell-input" /></td>
+              <td><input v-model="row.selected" type="checkbox" @change="saveState" /></td>
+              <td><input v-model="row.title" class="cell-input" @change="saveState" /></td>
+              <td><input v-model="row.artist" class="cell-input" @change="saveState" /></td>
+              <td><input v-model="row.album" class="cell-input" @change="saveState" /></td>
               <td class="td-sub">{{ fmtDuration(row.duration) }}</td>
               <td>
                 <span v-if="row.lyricText" class="ok">✓ {{ row.lyricName }}</span>
@@ -147,8 +154,71 @@ const importPercent = computed(() => importTotal.value ? Math.round(importCurren
 const selectedCount = computed(() => rows.value.filter(r => r.selected && r.status !== 'done').length)
 const lyricMatched = computed(() => rows.value.filter(r => r.lyricText).length)
 const allSelected = computed(() => rows.value.length > 0 && rows.value.every(r => r.selected))
+const doneCount = computed(() => rows.value.filter(r => r.status === 'done').length)
+const missingFileCount = computed(() => rows.value.filter(r => r.status !== 'done' && !r.audio && !r.uploadedUrl).length)
 
 let pendingLyricRow = null
+
+// ==================== 进度持久化 ====================
+/**
+ * 为什么不能简单"存下整个任务"？
+ *   浏览器出于安全，不允许网页保存 File 对象（刷新后文件句柄就失效了）。
+ *   所以这里持久化的是每行的元数据 + 已上传成功的音频 URL：
+ *     · 已完成的歌曲 —— 刷新后直接显示 ✅，不用重来
+ *     · 上传过但没建成功的 —— 记住了 uploadedUrl，重试时跳过重复上传
+ *     · 还没开始的行 —— 标记为「待重新选择文件」，再选一次同一个文件夹就按
+ *       (文件名 + 大小 + 修改时间) 把 File 接回去，从断点继续
+ */
+const STORAGE_KEY = 'batch-import-v1'
+
+const saveState = () => {
+  try {
+    const state = {
+      savedAt: Date.now(),
+      rows: rows.value.map(r => ({
+        key: r.key,
+        fileName: r.audio ? r.audio.name : r.fileName,
+        fileSize: r.audio ? r.audio.size : r.fileSize,
+        fileMtime: r.audio ? r.audio.lastModified : r.fileMtime,
+        title: r.title,
+        artist: r.artist,
+        album: r.album,
+        genre: r.genre,
+        duration: r.duration,
+        lyricText: r.lyricText,
+        lyricName: r.lyricName,
+        uploadedUrl: r.uploadedUrl || '',
+        status: r.status,
+        message: r.message,
+        selected: r.selected
+      })),
+      lyricPool: lyricPool.value.map(l => ({
+        fileName: l.file ? l.file.name : l.fileName,
+        fileSize: l.file ? l.file.size : l.fileSize,
+        text: l.text,
+        title: l.title,
+        artist: l.artist
+      }))
+    }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+  } catch (e) {
+    console.warn('保存导入进度失败（可能是 localStorage 满了）', e)
+  }
+}
+
+const clearState = () => {
+  try { localStorage.removeItem(STORAGE_KEY) } catch (e) { /* ignore */ }
+}
+
+const restoreState = () => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return null
+    return JSON.parse(raw)
+  } catch (e) {
+    return null
+  }
+}
 
 // ==================== 工具函数 ====================
 const extOf = (name) => (name.toLowerCase().split('.').pop() || '')
@@ -226,6 +296,7 @@ const statusText = (row) => {
   if (row.status === 'done') return '✅ 已导入'
   if (row.status === 'failed') return '❌ ' + (row.message || '失败')
   if (row.status === 'uploading') return '上传中…'
+  if (row.status === 'needFile') return '⚠️ 需重新选择文件'
   return row.lyricText ? '待导入（含歌词）' : '待导入（无歌词）'
 }
 
@@ -254,14 +325,26 @@ const addAudioFiles = async (fileList) => {
   if (!list.length) return
   parsing.value = true
   parseTotal.value = list.length
-  const existing = new Set(rows.value.map(r => r.key))
+  let relinked = 0
 
   for (let i = 0; i < list.length; i++) {
     const f = list[i]
     parseLabel.value = `解析 ${f.name}`
     parseCurrent.value = i + 1
     const key = `${f.name}_${f.size}_${f.lastModified}`
-    if (existing.has(key)) continue
+
+    // 断点续传：这次选的文件如果上次已经在列表里，直接把 File 接回去
+    const exist = rows.value.find(r => r.key === key)
+    if (exist) {
+      exist.audio = f
+      if (exist.status === 'needFile') { exist.status = 'idle'; exist.message = '' }
+      if (!exist.coverBlob) {
+        const id3 = await readId3FromFile(f)
+        if (id3 && id3.cover) exist.coverBlob = id3.cover
+      }
+      relinked++
+      continue
+    }
 
     const id3 = await readId3FromFile(f)
     const byName = parseAudioFileName(f.name)
@@ -270,6 +353,9 @@ const addAudioFiles = async (fileList) => {
     rows.value.push({
       key,
       audio: f,
+      fileName: f.name,
+      fileSize: f.size,
+      fileMtime: f.lastModified,
       title: (id3 && id3.title) || byName.title || baseNoExt(f.name),
       artist: (id3 && id3.artist) || byName.artist || '',
       album: (id3 && id3.album) || '',
@@ -278,6 +364,7 @@ const addAudioFiles = async (fileList) => {
       coverBlob: (id3 && id3.cover) || null,
       lyricText: '',
       lyricName: '',
+      uploadedUrl: '',
       selected: true,
       status: 'idle',
       message: ''
@@ -288,6 +375,8 @@ const addAudioFiles = async (fileList) => {
   parseCurrent.value = 0
   parseTotal.value = 0
   tryPairAll()
+  saveState()
+  if (relinked) ElMessage.success(`已接续上次进度：${relinked} 个文件重新关联成功`)
 }
 
 const addLyricFiles = async (fileList) => {
@@ -300,26 +389,28 @@ const addLyricFiles = async (fileList) => {
   for (let i = 0; i < list.length; i++) {
     const f = list[i]
     parseCurrent.value = i + 1
-    if (lyricPool.value.some(l => l.file.name === f.name && l.file.size === f.size)) continue
+    if (lyricPool.value.some(l => (l.file ? l.file.name : l.fileName) === f.name && (l.file ? l.file.size : l.fileSize) === f.size)) continue
     const text = await readTextFile(f)
     const meta = parseLyricFileName(f.name)
-    lyricPool.value.push({ file: f, text, title: meta.title, artist: meta.artist })
+    lyricPool.value.push({ file: f, fileName: f.name, fileSize: f.size, text, title: meta.title, artist: meta.artist })
   }
 
   parsing.value = false
   parseCurrent.value = 0
   parseTotal.value = 0
   tryPairAll()
+  saveState()
 }
 
 /** 给还没有歌词的行重新配对一次 */
 const tryPairAll = () => {
-  const usedFiles = new Set(rows.value.filter(r => r.lyricFile).map(r => r.lyricFile.name))
+  const usedFiles = new Set(rows.value.filter(r => r.lyricName).map(r => r.lyricName))
   rows.value.filter(r => !r.lyricText).forEach(row => {
-    const available = lyricPool.value.filter(l => !usedFiles.has(l.file.name))
+    const available = lyricPool.value.filter(l => !usedFiles.has(l.file ? l.file.name : l.fileName))
+    const audioName = row.audio ? row.audio.name : (row.fileName || '')
 
     // ① 同名文件（晴天.mp3 ↔ 晴天.lrc）
-    let hit = available.find(l => norm(baseNoExt(l.file.name)) === norm(baseNoExt(row.audio.name)))
+    let hit = available.find(l => norm(baseNoExt(l.file ? l.file.name : l.fileName)) === norm(baseNoExt(audioName)))
     // ② 歌名归一化相同
     if (!hit) hit = available.find(l => norm(l.title) === norm(row.title))
     // ③ 歌名 + 歌手都相同
@@ -339,10 +430,11 @@ const tryPairAll = () => {
     }
 
     if (hit) {
+      const lyricName = hit.file ? hit.file.name : hit.fileName
       row.lyricText = hit.text
-      row.lyricName = hit.file.name
-      row.lyricFile = hit.file
-      usedFiles.add(hit.file.name)
+      row.lyricName = lyricName
+      row.lyricFile = hit.file || null
+      usedFiles.add(lyricName)
     }
   })
 }
@@ -360,6 +452,7 @@ const onSingleLyricPicked = async (e) => {
   pendingLyricRow.lyricText = text
   pendingLyricRow.lyricName = f.name
   pendingLyricRow.lyricFile = f
+  saveState()
   ElMessage.success('歌词已附加')
   pendingLyricRow = null
 }
@@ -370,11 +463,20 @@ const blobToFile = (blob, name) => new File([blob.data], name, { type: blob.mime
 const startImport = async () => {
   const list = rows.value.filter(r => r.selected && r.status !== 'done')
   if (!list.length) return
+  // 没有文件（刷新后尚未重新选择文件夹）的行直接跳过，避免整批失败
+  const missing = list.filter(r => !r.audio && !r.uploadedUrl)
+  if (missing.length) {
+    missing.forEach(r => { r.status = 'needFile'; r.message = '请重新选择文件' })
+    ElMessage.warning(`有 ${missing.length} 首还没关联到文件，请重新选择音乐文件夹（或取消勾选它们）`)
+    return
+  }
+
   importing.value = true
   importTotal.value = list.length
   importCurrent.value = 0
   let ok = 0
   let fail = 0
+  let skipped = 0
 
   for (let i = 0; i < list.length; i++) {
     const row = list[i]
@@ -384,11 +486,16 @@ const startImport = async () => {
     importCurrent.value = i
 
     try {
-      // 1) 上传音频
-      const audioRes = await uploadAudio(row.audio)
-      const url = audioRes.data
+      // 1) 上传音频：如果上次已经传成功过，直接复用 URL，不再重复上传
+      let url = row.uploadedUrl
+      if (!url) {
+        const audioRes = await uploadAudio(row.audio)
+        url = audioRes.data
+        row.uploadedUrl = url
+        saveState()
+      }
 
-      // 2) 有内嵌封面就一起上传（ID3 里的图）
+      // 2) 有内嵌封面就一起上传（ID3 里的图）；刷新后 coverBlob 丢了就跳过
       let coverUrl = ''
       if (row.coverBlob) {
         try {
@@ -407,8 +514,8 @@ const startImport = async () => {
         coverUrl,
         lyric: row.lyricText || null,
         duration: row.duration,
-        format: extOf(row.audio.name),
-        fileSize: row.audio.size,
+        format: extOf(row.audio ? row.audio.name : (row.fileName || 'mp3')),
+        fileSize: row.audio ? row.audio.size : row.fileSize,
         status: 1
       })
       row.status = 'done'
@@ -420,30 +527,69 @@ const startImport = async () => {
       fail++
     }
     importCurrent.value = i + 1
+    saveState()
   }
 
   importing.value = false
-  ElMessage.success(`导入完成：成功 ${ok} 首${fail ? `，失败 ${fail} 首` : ''}`)
+  const remain = rows.value.filter(r => r.status !== 'done').length
+  if (!remain) clearState()   // 全部完成就不用再记住了
+  ElMessage.success(`导入完成：成功 ${ok} 首${fail ? `，失败 ${fail} 首` : ''}${skipped ? `，跳过 ${skipped} 首` : ''}`)
 }
 
 const retryFailed = () => {
   const failed = rows.value.filter(r => r.status === 'failed')
   if (!failed.length) { ElMessage.info('没有失败的项'); return }
-  failed.forEach(r => { r.status = 'idle'; r.selected = true })
+  failed.forEach(r => { r.status = r.audio || r.uploadedUrl ? 'idle' : 'needFile'; r.selected = true })
+  saveState()
   ElMessage.info(`已重置 ${failed.length} 首失败项，点「开始导入」重试`)
 }
 
 const toggleAll = (e) => {
   const v = e.target.checked
   rows.value.forEach(r => { if (r.status !== 'done') r.selected = v })
+  saveState()
 }
 
 const resetAll = () => {
   rows.value = []
   lyricPool.value = []
+  clearState()
 }
 
-onMounted(() => {})
+/** 挂载时恢复上次进度 */
+onMounted(() => {
+  const state = restoreState()
+  if (!state || !Array.isArray(state.rows) || !state.rows.length) return
+
+  lyricPool.value = (state.lyricPool || []).map(l => ({
+    file: null,
+    fileName: l.fileName,
+    fileSize: l.fileSize,
+    text: l.text,
+    title: l.title,
+    artist: l.artist
+  }))
+
+  rows.value = state.rows.map(r => {
+    let status = r.status
+    if (status === 'uploading') status = 'idle'          // 上次是导入中途被中断的
+    if (status !== 'done') status = 'needFile'           // 文件句柄已失效，等重新选择
+    return {
+      ...r,
+      audio: null,          // File 不能持久化，等用户重新选择文件夹后接回
+      coverBlob: null,
+      lyricFile: null,
+      status,
+      message: status === 'needFile' ? '请重新选择文件' : r.message
+    }
+  })
+
+  const done = rows.value.filter(r => r.status === 'done').length
+  const pending = rows.value.length - done
+  if (done > 0 || pending > 0) {
+    ElMessage.info(`已恢复上次进度：共 ${rows.value.length} 首，已完成 ${done} 首，待续 ${pending} 首`)
+  }
+})
 </script>
 
 <style scoped>
@@ -464,8 +610,9 @@ onMounted(() => {})
 .bar-inner { height: 100%; background: linear-gradient(90deg, #667eea, #764ba2); transition: width 0.2s; }
 .bar-inner.blue { background: linear-gradient(90deg, #4facfe, #00f2fe); }
 
-.stats { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; font-size: 13px; color: rgba(255,255,255,0.5); margin-bottom: 12px; }
-.stats b { color: rgba(255,255,255,0.85); }
+.resume-tip { display: flex; flex-direction: column; gap: 4px; padding: 10px 14px; margin-bottom: 12px; border-radius: 8px; background: rgba(245,166,35,0.12); border: 1px solid rgba(245,166,35,0.3); color: #f5a623; font-size: 12px; line-height: 1.6; }
+.resume-tip b { color: #ffc76b; }
+.stats { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; font-size: 13px; color: rgba(255,255,255,0.5); margin-bottom: 12px; }.stats b { color: rgba(255,255,255,0.85); }
 .stats b.ok { color: #43e97b; }
 .stats b.warn { color: #f5a623; }
 .stats .tip { margin-left: auto; font-size: 12px; color: rgba(255,255,255,0.3); }
