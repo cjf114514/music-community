@@ -3,6 +3,9 @@
     <div class="page-header">
       <h2>歌曲管理</h2>
       <div class="header-actions">
+        <button v-if="selectedIds.length" class="btn btn-success" @click="openBatchDialog">
+          批量编辑（{{ selectedIds.length }}）
+        </button>
         <button class="btn btn-primary" @click="openAddDialog">
           <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
           新增歌曲
@@ -23,6 +26,9 @@
       <table class="data-table">
         <thead>
           <tr>
+            <th style="width:40px">
+              <input type="checkbox" :checked="allSelected" @change="toggleSelectAll" />
+            </th>
             <th style="width:50px"></th>
             <th>歌曲信息</th>
             <th>歌手</th>
@@ -35,6 +41,9 @@
         </thead>
         <tbody>
           <tr v-for="song in songs" :key="song.id">
+            <td>
+              <input type="checkbox" :value="song.id" v-model="selectedIds" />
+            </td>
             <td>
               <div class="song-cover" v-if="song.coverUrl">
                 <img :src="song.coverUrl" alt="" />
@@ -180,11 +189,41 @@
         <button class="btn btn-primary" @click="saveSong">确定</button>
       </template>
     </el-dialog>
+
+    <!-- 批量编辑：只改勾选的字段，留空表示清空该字段 -->
+    <el-dialog v-model="batchVisible" :title="`批量编辑 ${selectedIds.length} 首歌曲`" width="460px" class="admin-dialog" :append-to-body="true">
+      <p class="batch-tip">勾选左侧方框的字段才会被修改；不勾选则保持原样。</p>
+      <div class="batch-row">
+        <label><input type="checkbox" v-model="batchUse.genre" /> 流派</label>
+        <el-select v-model="batchForm.genre" placeholder="选择或输入流派" clearable filterable allow-create size="small" style="flex:1">
+          <el-option v-for="g in genreOptions" :key="g" :label="g" :value="g" />
+        </el-select>
+      </div>
+      <div class="batch-row">
+        <label><input type="checkbox" v-model="batchUse.album" /> 专辑</label>
+        <el-input v-model="batchForm.album" placeholder="留空则清空专辑" size="small" style="flex:1" />
+      </div>
+      <div class="batch-row">
+        <label><input type="checkbox" v-model="batchUse.singer" /> 歌手</label>
+        <el-input v-model="batchForm.singer" placeholder="留空则清空歌手" size="small" style="flex:1" />
+      </div>
+      <div class="batch-row">
+        <label><input type="checkbox" v-model="batchUse.status" /> 状态</label>
+        <el-select v-model="batchForm.status" size="small" style="flex:1">
+          <el-option label="正常（上架）" :value="1" />
+          <el-option label="下架" :value="0" />
+        </el-select>
+      </div>
+      <template #footer>
+        <button class="btn btn-ghost" @click="batchVisible = false">取消</button>
+        <button class="btn btn-primary" @click="submitBatch">应用到 {{ selectedIds.length }} 首</button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, UploadFilled } from '@element-plus/icons-vue'
 import request from '@/api/request'
@@ -199,6 +238,49 @@ const dialogTitle = ref('')
 const form = reactive({ id: null, name: '', singer: '', album: '', genre: '', url: '', coverUrl: '', lyric: '' })
 
 const genreOptions = ['流行', '摇滚', '民谣', '电子', '古典', '爵士', 'R&B', '嘻哈', '金属', '乡村', '蓝调', '雷鬼', '拉丁', '新世纪', '中国风', '古风', '轻音乐', '纯音乐', '原声带', '其他']
+
+// ==================== 批量编辑 ====================
+const selectedIds = ref([])
+const batchVisible = ref(false)
+const batchForm = reactive({ genre: '', album: '', singer: '', status: 1 })
+// 每个字段一个开关：只有勾选的字段才会提交，避免误改
+const batchUse = reactive({ genre: false, album: false, singer: false, status: false })
+
+const allSelected = computed(() =>
+  songs.value.length > 0 && songs.value.every(s => selectedIds.value.includes(s.id))
+)
+
+const toggleSelectAll = (e) => {
+  selectedIds.value = e.target.checked ? songs.value.map(s => s.id) : []
+}
+
+const openBatchDialog = () => {
+  Object.assign(batchUse, { genre: false, album: false, singer: false, status: false })
+  Object.assign(batchForm, { genre: '', album: '', singer: '', status: 1 })
+  batchVisible.value = true
+}
+
+const submitBatch = async () => {
+  const payload = { ids: [...selectedIds.value] }
+  if (batchUse.genre) payload.genre = batchForm.genre || ''
+  if (batchUse.album) payload.album = batchForm.album || ''
+  if (batchUse.singer) payload.singer = batchForm.singer || ''
+  if (batchUse.status) payload.status = batchForm.status
+
+  if (Object.keys(payload).length === 1) {
+    ElMessage.warning('请至少勾选一个要修改的字段')
+    return
+  }
+  try {
+    const res = await request.put('/admin/songs/batch', payload)
+    ElMessage.success(`已更新 ${res.data?.changed ?? selectedIds.value.length} 首`)
+    batchVisible.value = false
+    selectedIds.value = []
+    loadSongs()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.message || '批量更新失败')
+  }
+}
 
 // ==================== 一体化拖拽导入 ====================
 const dragOver = ref(false)
@@ -508,4 +590,9 @@ onMounted(() => loadSongs())
 .upload-status { font-size: 12px; margin-top: 4px; }
 .upload-status.uploading { color: #f5a623; }
 .upload-status.success { color: #43e97b; }
+
+/* ===== 批量编辑弹窗 ===== */
+.batch-tip { font-size: 12px; color: rgba(255,255,255,0.4); margin-bottom: 14px; line-height: 1.6; }
+.batch-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.batch-row label { width: 100px; flex-shrink: 0; font-size: 13px; color: rgba(255,255,255,0.7); display: flex; align-items: center; gap: 6px; cursor: pointer; }
 </style>

@@ -6,7 +6,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import java.util.List;
 
-public interface SongRepository extends JpaRepository<Song, Long> {
+public interface SongRepository extends JpaRepository<Song, Long>, org.springframework.data.jpa.repository.JpaSpecificationExecutor<Song> {
     List<Song> findByNameContaining(String name);
 
     List<Song> findBySingerContaining(String singer);

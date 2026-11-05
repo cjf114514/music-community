@@ -125,6 +125,31 @@ public class SongController {
         return Result.success(songService.getRandomSongs(limit));
     }
 
+    /**
+     * 智能歌单 — GET /api/songs/smart
+     *
+     * 按组合条件动态筛选，例如：
+     *   /api/songs/smart?maxPlay=0&order=newest          → 从未播放过的
+     *   /api/songs/smart?minPlay=10&order=playCountDesc  → 最常听的
+     *   /api/songs/smart?genre=纯音乐&limit=50            → 指定流派
+     *   /api/songs/smart?addedWithinDays=7               → 最近一周添加的
+     *
+     * 所有参数可选，不传即"不加这个条件"。
+     */
+    @GetMapping("/smart")
+    public Result<List<Song>> smartQuery(
+            @RequestParam(required = false) String genre,
+            @RequestParam(required = false) String singer,
+            @RequestParam(required = false) String album,
+            @RequestParam(required = false) Long minPlay,
+            @RequestParam(required = false) Long maxPlay,
+            @RequestParam(required = false) Integer addedWithinDays,
+            @RequestParam(defaultValue = "newest") String order,
+            @RequestParam(defaultValue = "100") int limit) {
+        return Result.success(songService.smartQuery(
+                genre, singer, album, minPlay, maxPlay, addedWithinDays, order, limit));
+    }
+
     /** 添加歌曲 — POST /api/songs (需要登录) */
     @PostMapping
     public Result<Song> addSong(@RequestBody Song song) {

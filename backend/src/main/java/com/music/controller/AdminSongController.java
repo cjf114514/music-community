@@ -5,6 +5,7 @@ import com.music.annotation.RequireAdmin;
 import com.music.common.Result;
 import com.music.entity.Song;
 import com.music.repository.SongRepository;
+import com.music.service.SongService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -12,6 +13,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -22,6 +24,7 @@ import java.util.Map;
 public class AdminSongController {
 
     private final SongRepository songRepository;
+    private final SongService songService;
 
     @GetMapping
     @RequireAdmin
@@ -124,5 +127,43 @@ public class AdminSongController {
         song.setStatus(1);
         song.setPlayCount(0L);
         return Result.success(songRepository.save(song));
+    }
+
+    /**
+     * 批量修改歌曲标签 —— PUT /api/admin/songs/batch
+     *
+     * 请求体示例：
+     *   { "ids": [1,2,3], "genre": "纯音乐", "album": "合集", "singer": "某某", "status": 1 }
+     *
+     * 规则：只处理出现在请求体里的字段；
+     *      传空字符串表示"清空该字段"（比如把错误的专辑名去掉），
+     *      不传则保持原值不变。
+     */
+    @PutMapping("/batch")
+    @RequireAdmin
+    @OperationLogAnnotation(module = "歌曲管理", action = "UPDATE", description = "批量编辑歌曲", targetType = "song")
+    public Result<Map<String, Object>> batchUpdate(@RequestBody Map<String, Object> body) {
+        Object rawIds = body.get("ids");
+        if (!(rawIds instanceof List<?> idList) || idList.isEmpty()) {
+            return Result.error("请选择要修改的歌曲");
+        }
+        List<Long> ids = new ArrayList<>();
+        for (Object o : idList) {
+            if (o != null) ids.add(Long.valueOf(o.toString()));
+        }
+
+        Map<String, Object> fields = new HashMap<>();
+        for (String key : List.of("genre", "album", "singer", "status")) {
+            if (body.containsKey(key)) fields.put(key, body.get(key));
+        }
+        if (fields.isEmpty()) {
+            return Result.error("没有要修改的字段");
+        }
+
+        int changed = songService.batchUpdate(ids, fields);
+        Map<String, Object> result = new HashMap<>();
+        result.put("changed", changed);
+        result.put("requested", ids.size());
+        return Result.success(result);
     }
 }
