@@ -3,11 +3,26 @@
     <div v-if="showVisualizer && analyserNode" class="visualizer-bar">
       <AudioVisualizer :analyserNode="analyserNode" :width="visualizerWidth" :height="36" type="frequency" @toggle="showVisualizer = false" />
     </div>
-    <div class="progress-bar" @click="handleProgressClick">
+    <div
+      class="progress-bar"
+      @click="handleProgressClick"
+      @mousemove="onProgressHover"
+      @mouseleave="onProgressLeave"
+    >
       <div class="progress-bg">
         <div class="progress-fill" :style="{ width: progressPercent + '%' }">
           <div class="progress-dot"></div>
         </div>
+      </div>
+      <!-- 悬停预览：一条竖线 + 该位置对应的时间 -->
+      <div
+        v-if="hoverRatio !== null"
+        class="progress-preview"
+        :class="previewEdge"
+        :style="{ left: (hoverRatio * 100) + '%' }"
+      >
+        <span class="preview-line"></span>
+        <span class="preview-time">{{ fmtSec(hoverTime) }}</span>
       </div>
     </div>
     <div class="player-content">
@@ -268,6 +283,33 @@ const fmtSec = (s) => {
   const v = Math.max(0, Math.floor(Number(s) || 0))
   return `${Math.floor(v / 60)}:${String(v % 60).padStart(2, '0')}`
 }
+
+// ==================== 进度条悬停时间预览 ====================
+// hoverRatio = 鼠标在进度条上的相对位置（0~1），null 表示没悬停
+// 用它算出该位置对应的时间，显示成气泡；同时决定气泡是否要贴边
+const hoverRatio = ref(null)
+const hoverTime = ref(0)
+
+const previewEdge = computed(() => {
+  if (hoverRatio.value === null) return ''
+  if (hoverRatio.value < 0.05) return 'edge-left'
+  if (hoverRatio.value > 0.95) return 'edge-right'
+  return ''
+})
+
+const onProgressHover = (e) => {
+  if (!store.duration) return
+  const rect = e.currentTarget.getBoundingClientRect()
+  if (!rect.width) return
+  const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
+  hoverRatio.value = ratio
+  hoverTime.value = ratio * store.duration
+}
+
+const onProgressLeave = () => {
+  hoverRatio.value = null
+}
+
 const volume = ref(store.volume)
 const isMuted = ref(false)
 const isLiked = ref(false)
@@ -868,20 +910,71 @@ const stopDrag = () => {
 }
 
 .progress-bar {
-  height: 3px;
+  /* 可见进度条只有 3px，但命中区域做高一点，鼠标更容易对准 */
+  height: 14px;
+  display: flex;
+  align-items: center;
   cursor: pointer;
+  position: relative;
+}
+
+.progress-bg {
+  width: 100%;
+  height: 3px;
+  background: var(--bg-elevated);
+  border-radius: 2px;
   position: relative;
   transition: height 0.2s;
 }
 
-.progress-bar:hover {
+.progress-bar:hover .progress-bg {
   height: 5px;
 }
 
-.progress-bg {
-  height: 100%;
-  background: var(--bg-elevated);
-  position: relative;
+/* 悬停预览：竖线贴住鼠标，时间气泡在上方 */
+.progress-preview {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 10;
+}
+
+.preview-line {
+  display: block;
+  width: 2px;
+  height: 16px;
+  margin: 0 auto;
+  background: var(--accent-cyan);
+  box-shadow: 0 0 6px rgba(34, 211, 238, 0.8);
+  border-radius: 1px;
+}
+
+.preview-time {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 2px 7px;
+  background: rgba(16, 18, 32, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 5px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+  white-space: nowrap;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+}
+
+/* 靠近两端时气泡贴边，避免超出可视区域 */
+.progress-preview.edge-left .preview-time {
+  left: 0;
+  transform: none;
+}
+.progress-preview.edge-right .preview-time {
+  left: auto;
+  right: 0;
+  transform: none;
 }
 
 .progress-fill {
