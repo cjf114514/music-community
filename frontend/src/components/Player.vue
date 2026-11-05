@@ -760,15 +760,53 @@ const cancelSleepTimer = () => {
 
 const onPlay = () => {
   store.isPlaying = true
+  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing'
 }
 const onPause = () => {
   store.isPlaying = false
+  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused'
   reportProgress(true)   // 暂停时立刻存一次，避免丢最后一段进度
 }
 
 onMounted(() => {
   // 打开网站时，如果服务端有「上次没听完」的歌，给一个续播入口
   loadResumeOnStart()
+  setupMediaSession()
+})
+
+// ==================== 媒体会话（锁屏 / 通知栏控制）====================
+// 手机上把网站"添加到主屏幕"后，锁屏界面和通知栏能显示歌名并控制播放，
+// 这依赖浏览器的 Media Session API（Chromium / Safari 均支持）。
+const setupMediaSession = () => {
+  if (!('mediaSession' in navigator)) return
+  const ms = navigator.mediaSession
+  try {
+    ms.setActionHandler('play', () => { store.isPlaying = true; audioRef.value?.play().catch(() => {}) })
+    ms.setActionHandler('pause', () => { store.isPlaying = false; audioRef.value?.pause() })
+    ms.setActionHandler('previoustrack', () => playPrev())
+    ms.setActionHandler('nexttrack', () => playNext())
+    ms.setActionHandler('seekto', (d) => {
+      if (!audioRef.value || d.seekTime == null) return
+      audioRef.value.currentTime = d.seekTime
+      if (d.fastSeek && 'fastSeek' in audioRef.value) audioRef.value.fastSeek(d.seekTime)
+    })
+  } catch (e) { /* 部分动作浏览器不支持，忽略 */ }
+}
+
+// 切歌时更新锁屏显示的信息
+watch(() => store.currentSong, (song) => {
+  if (!('mediaSession' in navigator) || !song) return
+  const artwork = song.coverUrl
+    ? [{ src: normalizeUrl(song.coverUrl), sizes: '512x512' }]
+    : [{ src: '/icon-512.png', sizes: '512x512', type: 'image/png' }]
+  try {
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: song.name || '未知歌曲',
+      artist: song.singer || '',
+      album: song.album || 'NEON MUSIC',
+      artwork
+    })
+  } catch (e) { /* 忽略 */ }
 })
 
 const handleProgressClick = (e) => {  if (!audioRef.value || store.duration === 0) return
@@ -1810,5 +1848,62 @@ const stopDrag = () => {
 @keyframes resume-in {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+/* ==================== 移动端（≤768px）====================
+ * 桌面播放器是「歌曲信息 280px + 中间控制 + 右侧一堆增强控件」的三段布局，
+ * 窄屏放不下，做法是：
+ *   · 隐藏频谱条、音效、可视化、音量、下载（手机上音量用系统键，这些也用不上）
+ *   · 保留播放控制与睡眠定时（睡前听歌最常用）
+ *   · 歌曲信息占满剩余宽度，长歌名省略号
+ * ==================================================== */
+@media (max-width: 768px) {
+  .visualizer-bar { display: none !important; }
+
+  .player-content {
+    height: 64px;
+    padding: 0 10px env(safe-area-inset-bottom, 0px);
+    gap: 6px;
+  }
+
+  .song-info {
+    width: auto;
+    flex: 1;
+    min-width: 0;
+    gap: 8px;
+  }
+
+  .song-detail { min-width: 0; }
+  .song-name,
+  .song-singer {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .mini-lyric { display: none; }
+
+  .cover-wrapper {
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+  }
+
+  .equalizer-btn,
+  .visualizer-toggle,
+  .volume-control,
+  .download-btn,
+  .mode-btn { display: none !important; }
+
+  .controls { gap: 2px; flex-shrink: 0; }
+  .controls :deep(.el-button) { padding: 6px; }
+
+  /* 继续播放提示在窄屏上移到播放器上方并收窄 */
+  .resume-prompt,
+  .resume-chip {
+    left: 10px;
+    right: 10px;
+    bottom: calc(74px + env(safe-area-inset-bottom, 0px));
+    justify-content: center;
+  }
 }
 </style>
