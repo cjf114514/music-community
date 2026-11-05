@@ -7,18 +7,7 @@
       其他页面 → 显示完整布局 (侧边栏 + 头部 + 主内容 + 播放器 + 播放列表抽屉)
     -->
     <template v-if="showLayout">
-      <!-- 移动端顶栏：只在窄屏出现，用来打开侧边栏抽屉 -->
-      <div class="mobile-topbar">
-        <button class="m-menu-btn" aria-label="打开菜单" @click="uiStore.toggleSidebar()">
-          <svg viewBox="0 0 24 24" fill="currentColor" width="22" height="22"><path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"/></svg>
-        </button>
-        <span class="m-title">NEON MUSIC</span>
-      </div>
-
       <Sidebar />
-      <!-- 抽屉打开时的遮罩，点击关闭 -->
-      <div v-if="uiStore.sidebarOpen" class="mobile-overlay" @click="uiStore.closeSidebar()"></div>
-
       <div class="app-main">
         <Header />
         <main class="main-content">
@@ -46,7 +35,6 @@ import PlayListDrawer from './components/PlayListDrawer.vue'
 import DynamicBackground from './components/DynamicBackground.vue'
 import { useThemeStore } from '@/stores/theme'
 import { useMusicStore } from '@/stores/music'
-import { useUiStore } from '@/stores/ui'
 
 const route = useRoute()
 
@@ -59,7 +47,6 @@ const showLayout = computed(() => !route.meta.guest)
 
 const themeStore = useThemeStore()
 const musicStore = useMusicStore()
-const uiStore = useUiStore()
 
 /**
  * 全局键盘快捷键处理
@@ -264,64 +251,6 @@ body {
   max-width: 1400px;
   margin: 0 auto;
   padding: 24px 32px;
-}
-
-/* ==================== 移动端（≤768px）====================
- * 桌面用「固定侧边栏 + 主区左移 240px」的布局；
- * 窄屏放不下，改成：
- *   · 侧边栏变抽屉，默认藏在屏幕外（见 Sidebar.vue）
- *   · 顶部出现一个 52px 的标题栏，左侧是菜单按钮
- *   · 主区不再左移，内容和播放器留出安全区内边距
- * ==================================================== */
-.mobile-topbar { display: none; }
-.mobile-overlay { display: none; }
-
-@media (max-width: 768px) {
-  .mobile-topbar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    position: fixed;
-    top: 0; left: 0; right: 0;
-    height: calc(52px + env(safe-area-inset-top, 0px));
-    padding: env(safe-area-inset-top, 0px) 10px 0;
-    z-index: 130;
-    background: rgba(15, 15, 26, 0.94);
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
-  }
-  .m-menu-btn {
-    background: none; border: none; padding: 6px 8px;
-    color: rgba(255, 255, 255, 0.82); cursor: pointer; display: flex; align-items: center;
-  }
-  .m-title {
-    font-size: 14px; font-weight: 600; letter-spacing: 1.5px;
-    color: rgba(255, 255, 255, 0.9);
-  }
-
-  .mobile-overlay {
-    display: block;
-    position: fixed; inset: 0;
-    background: rgba(0, 0, 0, 0.55);
-    z-index: 115;
-  }
-
-  /* 主区铺满，顶部让出标题栏高度 */
-  .app-main {
-    margin-left: 0 !important;
-    padding-top: calc(52px + env(safe-area-inset-top, 0px));
-  }
-
-  .main-content {
-    padding: 14px 12px calc(84px + env(safe-area-inset-bottom, 0px));
-  }
-
-  /* 列表类表格在窄屏横向滚动，不要挤压变形 */
-  .main-content table { min-width: 520px; }
-
-  /* 窄屏下滚动条隐藏，避免占位 */
-  ::-webkit-scrollbar { width: 0; height: 0; }
 }
 
 /* 自定义滚动条样式 */

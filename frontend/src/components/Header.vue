@@ -921,23 +921,4 @@ const formatNotificationTime = (time) => {
   word-break: break-word;
 }
 
-/* ==================== 移动端（≤768px）====================
- * 顶栏在窄屏只保留：搜索框（收窄）+ 消息/通知图标 + 头像。
- * 桌面端留白较多，这里压缩内边距，避免横向溢出。
- * ==================================================== */
-@media (max-width: 768px) {
-  .header { padding: 0 8px; }
-  .header-content {
-    padding: 0;
-    gap: 6px;
-  }
-  .search-input-wrapper {
-    width: auto;
-    flex: 1;
-    min-width: 0;
-    height: 34px;
-    padding: 0 10px;
-  }
-  .search-input { width: 100% !important; min-width: 0; }
-}
 </style>

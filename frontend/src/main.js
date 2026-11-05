@@ -47,18 +47,3 @@ app.use(pinia)    // 注册状态管理
 app.use(router)   // 注册路由
 app.use(ElementPlus) // 注册 UI 组件库
 app.mount('#app') // 挂载到页面 — 从这一刻起,Vue 开始接管 DOM
-
-/**
- * 注册 Service Worker —— 让网站支持"添加到主屏幕"和离线打开
- *
- * 为什么要放在 load 之后？
- *   避免和首屏资源加载抢带宽，先让页面出来再后台装 SW。
- * 失败不报错：SW 只是增强能力，注册不上网站照样能用。
- */
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => {
-      /* 开发环境或非 HTTPS 下可能注册失败，静默忽略 */
-    })
-  })
-}
