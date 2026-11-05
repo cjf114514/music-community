@@ -78,6 +78,21 @@
       </div>
     </div>
 
+    <!-- 断点续播：切到有进度的歌时提示 -->
+    <div v-if="pendingResume" class="resume-prompt">
+      <span class="resume-text">这首歌上次听到 <b>{{ fmtSec(pendingResume.position) }}</b></span>
+      <button class="resume-act primary" @click="confirmResume">继续播放</button>
+      <button class="resume-act" @click="dismissResume">从头开始</button>
+    </div>
+
+    <!-- 打开网站时的续播入口 -->
+    <div v-if="resumeInfo && !currentSong" class="resume-chip" @click="playResume">
+      <span class="chip-label">继续上次</span>
+      <span class="chip-song">{{ resumeInfo.song.name }}</span>
+      <span class="chip-pos">{{ fmtSec(resumeInfo.position) }}</span>
+      <span class="chip-close" @click.stop="resumeInfo = null">×</span>
+    </div>
+
     <audio
       ref="audioRef"
       :src="normalizeUrl(currentSong?.url)"
@@ -227,18 +242,32 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useMusicStore } from '@/stores/music'
 import { useUserStore } from '@/stores/user'
 import { useLyric } from '@/composables/useLyric'
 import AudioVisualizer from './AudioVisualizer.vue'
 import { recordPlay } from '@/api/playHistory'
+import { saveProgress, getProgress, getResume } from '@/api/progress'
 import { getSongLyric, downloadSong, updateSongDuration } from '@/api/song'
 import { ElMessage } from 'element-plus'
 
 const store = useMusicStore()
 const userStore = useUserStore()
 const audioRef = ref(null)
+
+// ==================== 断点续播 / 跨设备续听 ====================
+// pendingResume：切到某首歌时，服务端发现这首歌有上次的进度，提示"继续播放"
+// resumeInfo   ：打开网站时，服务端有"最近没听完的歌"，显示一个续播入口
+const pendingResume = ref(null)
+const resumeInfo = ref(null)
+let pendingSeek = 0             // 待跳转的位置（等元数据加载完再跳）
+let lastProgressAt = 0          // 上次上报的时间戳，用于节流
+
+const fmtSec = (s) => {
+  const v = Math.max(0, Math.floor(Number(s) || 0))
+  return `${Math.floor(v / 60)}:${String(v % 60).padStart(2, '0')}`
+}
 const volume = ref(store.volume)
 const isMuted = ref(false)
 const isLiked = ref(false)
@@ -474,6 +503,10 @@ watch(() => store.currentSong, async (newSong) => {
       await audioRef.value.play()
       if (userStore.userInfo?.userId && newSong?.id) {
         recordPlay(newSong.id).catch(() => {})
+        // 检查这首歌有没有上次的进度，有就弹出"继续播放"
+        checkResumePosition(newSong)
+        lastProgressAt = 0
+        pendingResume.value = null
       }
     } catch (e) {
       console.error('播放失败:', e)
@@ -569,6 +602,10 @@ const playNext = () => {
 }
 
 const onEnded = () => {
+  // 播完了：清掉这首歌的进度，下次从头开始
+  if (currentSong.value?.id && userStore.userInfo?.userId) {
+    saveProgress(currentSong.value.id, 0).catch(() => {})
+  }
   if (store.isQueueMode) {
     const currentIndex = currentList.value.findIndex(s => s.id === currentSong.value?.id)
     if (currentIndex < currentList.value.length - 1) {
@@ -585,12 +622,100 @@ const onEnded = () => {
 const onTimeUpdate = () => {
   if (audioRef.value) {
     store.setCurrentTime(audioRef.value.currentTime)
+    // 播放中每 10 秒上报一次进度（节流由 reportProgress 内部判断）
+    if (store.isPlaying) reportProgress()
   }
+}
+
+/** 上报播放位置（节流 10 秒；force=true 立即上报，用于暂停/切歌） */
+const reportProgress = (force = false) => {
+  const song = currentSong.value
+  if (!song?.id || !userStore.userInfo?.userId) return
+  const now = Date.now()
+  if (!force && now - lastProgressAt < 10000) return
+  lastProgressAt = now
+  const pos = Math.floor(audioRef.value?.currentTime || 0)
+  saveProgress(song.id, pos).catch(() => {})
+}
+
+/** 切歌后检查这首歌有没有上次的进度 */
+const checkResumePosition = async (song) => {
+  pendingResume.value = null
+  if (!song?.id || !userStore.userInfo?.userId) return
+  try {
+    const res = await getProgress(song.id)
+    const pos = res.data?.position || 0
+    if (pos < 5) return
+    const dur = song.duration || 0
+    // 已经接近结尾的就不提示了
+    if (dur && pos > dur - 10) return
+    pendingResume.value = { songId: song.id, position: pos }
+  } catch (e) { /* 静默失败，不影响播放 */ }
+}
+
+const confirmResume = async () => {
+  if (!pendingResume.value || !audioRef.value) return
+  const pos = pendingResume.value.position
+  pendingResume.value = null
+
+  if (!audioRef.value.duration) {
+    // 页面刚打开、音频还没加载元数据：先播放，等 loadedmetadata 再跳（见 onLoadedMetadata）
+    pendingSeek = pos
+    await audioRef.value.play().catch(() => {})
+    store.isPlaying = true
+  } else {
+    audioRef.value.currentTime = pos
+    store.setCurrentTime(pos)
+    audioRef.value.play().catch(() => {})
+  }
+  ElMessage.success(`已跳到上次听到的 ${fmtSec(pos)}`)
+}
+
+const dismissResume = () => {
+  if (pendingResume.value && userStore.userInfo?.userId) {
+    // 选择从头听 → 清掉服务端进度
+    saveProgress(pendingResume.value.songId, 0).catch(() => {})
+  }
+  pendingResume.value = null
+}
+
+/** 打开网站时拉一次续播信息 */
+const loadResumeOnStart = async () => {
+  if (!userStore.userInfo?.userId) return
+  try {
+    if (store.currentSong) {
+      // 场景一：关标签页前正在听某首歌（localStorage 里存着）→ 直接检查这首歌的进度
+      await checkResumePosition(store.currentSong)
+    } else {
+      // 场景二：本机没有播放记录（比如换了设备/浏览器）→ 问服务端"最近听的最后一首"
+      // 此时播放器里没有歌，用右下角的「继续上次」小条，点击后才加载并跳转
+      const res = await getResume()
+      if (res.data?.song) {
+        resumeInfo.value = { song: res.data.song, position: res.data.position || 0 }
+      }
+    }
+  } catch (e) { /* 静默失败，不影响播放 */ }
+}
+
+/** 点击「继续上次播放」 */
+const playResume = () => {
+  const info = resumeInfo.value
+  if (!info) return
+  resumeInfo.value = null
+  pendingSeek = info.position || 0
+  store.setPlayList([info.song])
+  store.setCurrentSong(info.song)
 }
 
 const onLoadedMetadata = () => {
   if (audioRef.value) {
     store.setDuration(audioRef.value.duration)
+    // 元数据就绪后再跳转，否则 currentTime 赋值无效
+    if (pendingSeek > 0) {
+      audioRef.value.currentTime = pendingSeek
+      store.setCurrentTime(pendingSeek)
+      pendingSeek = 0
+    }
     if (currentSong.value?.id && (!currentSong.value.duration || currentSong.value.duration === 0)) {
       const dur = Math.round(audioRef.value.duration)
       if (dur > 0) {
@@ -636,13 +761,17 @@ const cancelSleepTimer = () => {
 const onPlay = () => {
   store.isPlaying = true
 }
-
 const onPause = () => {
   store.isPlaying = false
+  reportProgress(true)   // 暂停时立刻存一次，避免丢最后一段进度
 }
 
-const handleProgressClick = (e) => {
-  if (!audioRef.value || store.duration === 0) return
+onMounted(() => {
+  // 打开网站时，如果服务端有「上次没听完」的歌，给一个续播入口
+  loadResumeOnStart()
+})
+
+const handleProgressClick = (e) => {  if (!audioRef.value || store.duration === 0) return
   const rect = e.currentTarget.getBoundingClientRect()
   const percent = (e.clientX - rect.left) / rect.width
   const time = percent * store.duration
@@ -1615,5 +1744,71 @@ const stopDrag = () => {
   color: rgba(180, 200, 240, 0.3);
   margin-top: 2px;
   text-shadow: none;
+}
+
+/* ==================== 断点续播 UI ==================== */
+.resume-prompt {
+  position: fixed;
+  right: 24px;
+  bottom: 96px;
+  z-index: 3000;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(30, 32, 52, 0.96);
+  border: 1px solid rgba(102, 126, 234, 0.35);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(8px);
+  animation: resume-in 0.22s ease-out;
+}
+.resume-text b { color: #a8b4ff; font-weight: 600; }
+.resume-act {
+  padding: 4px 12px;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.65);
+  transition: all 0.2s;
+}
+.resume-act:hover { background: rgba(255, 255, 255, 0.16); }
+.resume-act.primary { background: rgba(102, 126, 234, 0.35); color: #c3ccff; }
+.resume-act.primary:hover { background: rgba(102, 126, 234, 0.55); }
+
+.resume-chip {
+  position: fixed;
+  right: 24px;
+  bottom: 96px;
+  z-index: 3000;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 20px;
+  background: rgba(30, 32, 52, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  animation: resume-in 0.22s ease-out;
+  transition: all 0.2s;
+}
+.resume-chip:hover { border-color: rgba(102, 126, 234, 0.5); background: rgba(40, 44, 72, 0.96); }
+.chip-label { color: #a8b4ff; }
+.chip-song { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: rgba(255,255,255,0.85); }
+.chip-pos { color: rgba(255, 255, 255, 0.4); }
+.chip-close { margin-left: 2px; color: rgba(255, 255, 255, 0.3); padding: 0 2px; }
+.chip-close:hover { color: #f5576c; }
+
+@keyframes resume-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 </style>

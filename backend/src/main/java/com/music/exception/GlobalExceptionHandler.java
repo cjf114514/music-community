@@ -42,6 +42,18 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * 未认证 → HTTP 401 + code 401
+     *
+     * 用于 Controller 内部自行校验登录态的场景
+     * （JwtInterceptor 对「无 Token 的 GET」放行，需要业务侧兜底的地方）
+     */
+    @ExceptionHandler(UnauthorizedException.class)
+    @ResponseStatus(HttpStatus.UNAUTHORIZED)
+    public Result<Void> handleUnauthorized(UnauthorizedException e) {
+        return Result.error(401, e.getMessage() == null ? "请先登录" : e.getMessage());
+    }
+
+    /**
      * 其他运行时异常 → HTTP 500 + code 500
      *
      * 这里兼作兜底：项目里还有大量历史代码用
