@@ -54,6 +54,20 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * 路径/查询参数类型不对 → HTTP 400
+     *
+     * 例如 /api/songs/abc（id 需要 Long）、/api/songs/smart（已下线的路径被 /{id} 匹配到）。
+     * 以前这类请求会因为类型转换失败直接抛 500，语义上应该是"请求参数有问题"。
+     */
+    @ExceptionHandler(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public Result<Void> handleTypeMismatch(
+            org.springframework.web.method.annotation.MethodArgumentTypeMismatchException e) {
+        log.debug("参数类型不匹配: {} = {}", e.getName(), e.getValue());
+        return Result.error(400, "参数格式错误：" + e.getName() + " = " + e.getValue());
+    }
+
+    /**
      * 其他运行时异常 → HTTP 500 + code 500
      *
      * 这里兼作兜底：项目里还有大量历史代码用

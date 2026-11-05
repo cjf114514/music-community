@@ -145,7 +145,7 @@ public class AdminSongController {
     public Result<Map<String, Object>> batchUpdate(@RequestBody Map<String, Object> body) {
         Object rawIds = body.get("ids");
         if (!(rawIds instanceof List<?> idList) || idList.isEmpty()) {
-            return Result.error("请选择要修改的歌曲");
+            return Result.error(400, "请选择要修改的歌曲");
         }
         List<Long> ids = new ArrayList<>();
         for (Object o : idList) {
@@ -157,7 +157,7 @@ public class AdminSongController {
             if (body.containsKey(key)) fields.put(key, body.get(key));
         }
         if (fields.isEmpty()) {
-            return Result.error("没有要修改的字段");
+            return Result.error(400, "没有要修改的字段");
         }
 
         int changed = songService.batchUpdate(ids, fields);

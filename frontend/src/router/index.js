@@ -60,7 +60,6 @@ const routes = [
   // :id = 动态路由参数, /playlist/5 → id=5
   { path: '/song/:id', name: 'SongDetail', component: () => import('@/views/SongDetail.vue') },
   { path: '/ranking', name: 'Ranking', component: () => import('@/views/Ranking.vue') },
-  { path: '/smart-playlist', name: 'SmartPlaylist', component: () => import('@/views/SmartPlaylist.vue') },
   { path: '/singer/:name', name: 'SingerDetail', component: () => import('@/views/SingerDetail.vue') },
   { path: '/album/:name', name: 'AlbumDetail', component: () => import('@/views/AlbumDetail.vue') },
   { path: '/community', name: 'Community', component: () => import('@/views/Community.vue') },

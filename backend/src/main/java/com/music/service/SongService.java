@@ -4,16 +4,10 @@ import com.music.entity.Singer;
 import com.music.entity.Song;
 import com.music.repository.SingerRepository;
 import com.music.repository.SongRepository;
-import jakarta.persistence.criteria.Predicate;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Sort;
-import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -89,52 +83,6 @@ public class SongService {
 
     public List<Song> getAlbumSongs(String album) {
         return songRepository.findByAlbumContainingAndStatus(album, 1);
-    }
-
-    /**
-     * 智能歌单查询 —— 按条件动态筛选歌曲
-     *
-     * 为什么用 Specification 而不是写死几个 @Query？
-     *   条件是用户在前端组合出来的（流派 + 播放次数区间 + 添加时间 + 排序），
-     *   组合数量很大，写死查询会爆炸。Specification 可以按需拼 Predicate。
-     *
-     * @param genre           流派精确匹配（可空）
-     * @param singer          歌手模糊匹配（可空）
-     * @param album           专辑模糊匹配（可空）
-     * @param minPlay         最小播放次数（可空）
-     * @param maxPlay         最大播放次数（传 0 即"从未播放"）
-     * @param addedWithinDays 最近 N 天添加（可空）
-     * @param order           playCountDesc / playCountAsc / newest / oldest
-     * @param limit           最多返回多少首（上限 500，防止一次拉爆前端）
-     */
-    public List<Song> smartQuery(String genre, String singer, String album,
-                                 Long minPlay, Long maxPlay, Integer addedWithinDays,
-                                 String order, int limit) {
-        Specification<Song> spec = (root, query, cb) -> {
-            List<Predicate> ps = new ArrayList<>();
-            ps.add(cb.equal(root.get("status"), 1));   // 只查上架的
-
-            if (genre != null && !genre.isBlank()) ps.add(cb.equal(root.get("genre"), genre));
-            if (singer != null && !singer.isBlank()) ps.add(cb.like(root.get("singer"), "%" + singer + "%"));
-            if (album != null && !album.isBlank()) ps.add(cb.like(root.get("album"), "%" + album + "%"));
-            if (minPlay != null) ps.add(cb.greaterThanOrEqualTo(root.get("playCount"), minPlay));
-            if (maxPlay != null) ps.add(cb.lessThanOrEqualTo(root.get("playCount"), maxPlay));
-            if (addedWithinDays != null && addedWithinDays > 0) {
-                ps.add(cb.greaterThanOrEqualTo(root.get("createTime"),
-                        LocalDateTime.now().minusDays(addedWithinDays)));
-            }
-            return cb.and(ps.toArray(new Predicate[0]));
-        };
-
-        Sort sort = switch (order == null ? "" : order) {
-            case "playCountDesc" -> Sort.by(Sort.Direction.DESC, "playCount");
-            case "playCountAsc" -> Sort.by(Sort.Direction.ASC, "playCount");
-            case "oldest" -> Sort.by(Sort.Direction.ASC, "createTime");
-            default -> Sort.by(Sort.Direction.DESC, "createTime");
-        };
-
-        int pageSize = Math.max(1, Math.min(limit, 500));
-        return songRepository.findAll(spec, PageRequest.of(0, pageSize, sort)).getContent();
     }
 
     /**
